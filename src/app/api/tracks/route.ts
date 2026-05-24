@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { mbFetch } from "../../lib/mb";
 
 const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
 const ITUNES_BASE = "https://itunes.apple.com/search";
@@ -6,9 +7,6 @@ const YOUTUBE_SEARCH_BASE = "https://www.googleapis.com/youtube/v3/search";
 const USER_AGENT = "3070-final-project/1.0 (contact@example.com)";
 const RESPONSE_LIMIT = 5;
 const CACHE_TTL_MS = 60_000;
-const MB_MIN_INTERVAL_MS = 1_200;
-
-let lastMbRequest = 0;
 
 interface MBRelease {
   id: string;
@@ -155,10 +153,6 @@ async function fetchPage(
   letter: string,
   offset: number,
 ): Promise<MBRecording[]> {
-  const wait = MB_MIN_INTERVAL_MS - (Date.now() - lastMbRequest);
-  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastMbRequest = Date.now();
-
   const url = new URL(`${MUSICBRAINZ_BASE}/recording`);
   url.searchParams.set("query", `recording:${letter}*`);
   url.searchParams.set("offset", String(offset));
@@ -166,10 +160,7 @@ async function fetchPage(
   url.searchParams.set("inc", "artist-credits releases");
   url.searchParams.set("fmt", "json");
 
-  const response = await fetch(url.toString(), {
-    headers: { "User-Agent": USER_AGENT },
-    next: { revalidate: 0 },
-  });
+  const response = await mbFetch(url.toString());
 
   if (!response.ok)
     throw new Error(`MusicBrainz responded with ${response.status}`);
