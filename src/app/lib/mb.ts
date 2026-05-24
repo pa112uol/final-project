@@ -1,4 +1,6 @@
-const USER_AGENT = "3070-final-project/1.0 (contact@example.com)";
+// MusicBrainz requires a meaningful User-Agent: App/Version (contact)
+// See: https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
+const USER_AGENT = "NextTrack/1.0 (https://github.com/nexttrack)";
 const MB_MIN_INTERVAL_MS = 1_500;
 
 // Promise chain ensures MB requests are fully serialized across all routes.
@@ -17,7 +19,7 @@ export function mbFetch(url: string): Promise<Response> {
       }),
   );
 
-  // Advance the chain only after cooldown completes (whether fetch succeeded or not)
+  // Advance the chain only after cooldown completes, whether fetch succeeded or not
   queue = result
     .then(
       () => new Promise<void>((r) => setTimeout(r, MB_MIN_INTERVAL_MS)),
@@ -27,3 +29,4 @@ export function mbFetch(url: string): Promise<Response> {
 
   return result;
 }
+

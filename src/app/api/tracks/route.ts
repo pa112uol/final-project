@@ -4,7 +4,7 @@ import { mbFetch } from "../../lib/mb";
 const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
 const ITUNES_BASE = "https://itunes.apple.com/search";
 const YOUTUBE_SEARCH_BASE = "https://www.googleapis.com/youtube/v3/search";
-const USER_AGENT = "3070-final-project/1.0 (contact@example.com)";
+const USER_AGENT = "NextTrack/1.0 (https://github.com/nexttrack)";
 const RESPONSE_LIMIT = 5;
 const CACHE_TTL_MS = 60_000;
 
