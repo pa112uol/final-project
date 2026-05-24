@@ -110,8 +110,11 @@ async function getYoutubeVideoId(
   try {
     const url = new URL(YOUTUBE_SEARCH_BASE);
     url.searchParams.set("part", "snippet");
-    url.searchParams.set("q", `${artist} ${title}`);
+    // Search for an exact match of "artist title" to increase chances of getting the correct video
+    url.searchParams.set("q", `"${artist}" "${title}"`);
     url.searchParams.set("type", "video");
+    // Filter by music category to improve relevance
+    url.searchParams.set("videoCategoryId", "10");
     url.searchParams.set("maxResults", "1");
     url.searchParams.set("key", apiKey);
 
