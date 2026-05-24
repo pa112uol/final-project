@@ -44,7 +44,9 @@ function TrackCard({ track }: { track: Track }) {
           <p className="text-sm text-zinc-500">{track.artist}</p>
         </div>
         <div className="shrink-0 text-right text-xs text-zinc-400">
-          {track.firstReleaseDate && <p>{track.firstReleaseDate.slice(0, 4)}</p>}
+          {track.firstReleaseDate && (
+            <p>{track.firstReleaseDate.slice(0, 4)}</p>
+          )}
           {track.durationMs && <p>{formatDuration(track.durationMs)}</p>}
         </div>
       </div>
@@ -100,14 +102,13 @@ export default function TracksList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
-    setLoading(true);
-    setError(null);
+  async function fetchTracks() {
     try {
       const res = await fetch("/api/tracks");
       if (!res.ok) throw new Error("Failed to load tracks");
       const data = await res.json();
       setTracks(data.tracks);
+      setError(null);
     } catch {
       setError("Could not load tracks. Please try again.");
     } finally {
@@ -116,8 +117,18 @@ export default function TracksList() {
   }
 
   useEffect(() => {
-    load();
+    async function loadTracks() {
+      await fetchTracks();
+    }
+
+    loadTracks();
   }, []);
+
+  function handleShuffle() {
+    setLoading(true);
+    setError(null);
+    fetchTracks();
+  }
 
   return (
     <>
@@ -126,7 +137,7 @@ export default function TracksList() {
           Random Tracks
         </h1>
         <button
-          onClick={load}
+          onClick={handleShuffle}
           disabled={loading}
           className="rounded-full bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
         >
@@ -157,3 +168,4 @@ export default function TracksList() {
     </>
   );
 }
+
