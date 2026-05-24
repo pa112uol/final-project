@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
+const ITUNES_BASE = "https://itunes.apple.com/search";
 const USER_AGENT = "3070-final-project/1.0 (contact@example.com)";
 const POOL_SIZE = 25;
 const RESPONSE_LIMIT = 5;
@@ -26,6 +27,13 @@ interface MBRecording {
   "first-release-date"?: string;
 }
 
+interface StreamingLinks {
+  appleMusic: string | null;
+  preview: string | null;
+  youtube: string;
+  spotify: string;
+}
+
 interface Track {
   mbid: string;
   title: string;
@@ -34,10 +42,11 @@ interface Track {
   durationMs: number | null;
   firstReleaseDate: string | null;
   releases: { mbid: string; title: string; date?: string }[];
+  streaming: StreamingLinks;
 }
 
 interface Cache {
-  pool: Track[];
+  pool: Omit<Track, "streaming">[];
   expiresAt: number;
 }
 
@@ -47,7 +56,7 @@ function randomLetter(): string {
   return String.fromCharCode(97 + Math.floor(Math.random() * 26));
 }
 
-function toTrack(recording: MBRecording): Track {
+function toBaseTrack(recording: MBRecording): Omit<Track, "streaming"> {
   const credit = recording["artist-credit"]?.[0];
   return {
     mbid: recording.id,
@@ -62,6 +71,39 @@ function toTrack(recording: MBRecording): Track {
       date: r.date,
     })),
   };
+}
+
+async function getStreamingLinks(
+  artist: string,
+  title: string,
+): Promise<StreamingLinks> {
+  const query = encodeURIComponent(`${artist} ${title}`);
+  const youtube = `https://www.youtube.com/results?search_query=${query}`;
+  const spotify = `https://open.spotify.com/search/${query}`;
+
+  try {
+    const url = new URL(ITUNES_BASE);
+    url.searchParams.set("term", `${artist} ${title}`);
+    url.searchParams.set("entity", "song");
+    url.searchParams.set("limit", "1");
+
+    const res = await fetch(url.toString(), {
+      headers: { "User-Agent": USER_AGENT },
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const result = data.results?.[0];
+      return {
+        appleMusic: result?.trackViewUrl ?? null,
+        preview: result?.previewUrl ?? null,
+        youtube,
+        spotify,
+      };
+    }
+  } catch {}
+
+  return { appleMusic: null, preview: null, youtube, spotify };
 }
 
 async function fetchPage(
@@ -86,11 +128,11 @@ async function fetchPage(
   return data.recordings as MBRecording[];
 }
 
-async function buildPool(): Promise<Track[]> {
+async function buildPool(): Promise<Omit<Track, "streaming">[]> {
   const letter = randomLetter();
   const offset = Math.floor(Math.random() * 400);
   const recordings = await fetchPage(letter, offset);
-  return recordings.map(toTrack);
+  return recordings.map(toBaseTrack);
 }
 
 function shuffle<T>(arr: T[]): T[] {
@@ -115,7 +157,13 @@ export async function GET() {
     }
   }
 
-  const tracks = shuffle(cache.pool).slice(0, RESPONSE_LIMIT);
+  const selected = shuffle(cache.pool).slice(0, RESPONSE_LIMIT);
+  const tracks = await Promise.all(
+    selected.map(async (track) => ({
+      ...track,
+      streaming: await getStreamingLinks(track.artist, track.title),
+    })),
+  );
+
   return NextResponse.json({ tracks });
 }
-
