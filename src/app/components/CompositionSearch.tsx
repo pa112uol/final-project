@@ -14,11 +14,7 @@ export default function CompositionSearch() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      setOpen(false);
-      return;
-    }
+    if (!query.trim()) return;
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
@@ -64,7 +60,14 @@ export default function CompositionSearch() {
           ref={inputRef}
           type="text"
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setQuery(val);
+            if (!val.trim()) {
+              setResults([]);
+              setOpen(false);
+            }
+          }}
           onFocus={() => results.length > 0 && setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           placeholder="Search for an artist or track…"
@@ -130,3 +133,4 @@ export default function CompositionSearch() {
     </div>
   );
 }
+
