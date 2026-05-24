@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 
 const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
 const ITUNES_BASE = "https://itunes.apple.com/search";
+const YOUTUBE_SEARCH_BASE = "https://www.googleapis.com/youtube/v3/search";
 const USER_AGENT = "3070-final-project/1.0 (contact@example.com)";
-const POOL_SIZE = 25;
 const RESPONSE_LIMIT = 5;
 const CACHE_TTL_MS = 60_000;
 
@@ -30,7 +30,7 @@ interface MBRecording {
 interface StreamingLinks {
   appleMusic: string | null;
   preview: string | null;
-  youtube: string;
+  youtubeVideoId: string | null;
   spotify: string;
 }
 
@@ -73,14 +73,10 @@ function toBaseTrack(recording: MBRecording): Omit<Track, "streaming"> {
   };
 }
 
-async function getStreamingLinks(
+async function getItunesLinks(
   artist: string,
   title: string,
-): Promise<StreamingLinks> {
-  const query = encodeURIComponent(`${artist} ${title}`);
-  const youtube = `https://www.youtube.com/results?search_query=${query}`;
-  const spotify = `https://open.spotify.com/search/${query}`;
-
+): Promise<{ appleMusic: string | null; preview: string | null }> {
   try {
     const url = new URL(ITUNES_BASE);
     url.searchParams.set("term", `${artist} ${title}`);
@@ -97,13 +93,56 @@ async function getStreamingLinks(
       return {
         appleMusic: result?.trackViewUrl ?? null,
         preview: result?.previewUrl ?? null,
-        youtube,
-        spotify,
       };
     }
   } catch {}
 
-  return { appleMusic: null, preview: null, youtube, spotify };
+  return { appleMusic: null, preview: null };
+}
+
+async function getYoutubeVideoId(
+  artist: string,
+  title: string,
+): Promise<string | null> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const url = new URL(YOUTUBE_SEARCH_BASE);
+    url.searchParams.set("part", "snippet");
+    url.searchParams.set("q", `${artist} ${title}`);
+    url.searchParams.set("type", "video");
+    url.searchParams.set("maxResults", "1");
+    url.searchParams.set("key", apiKey);
+
+    const res = await fetch(url.toString());
+    if (res.ok) {
+      const data = await res.json();
+      return data.items?.[0]?.id?.videoId ?? null;
+    }
+  } catch {}
+
+  return null;
+}
+
+async function getStreamingLinks(
+  artist: string,
+  title: string,
+): Promise<StreamingLinks> {
+  const query = encodeURIComponent(`${artist} ${title}`);
+  const spotify = `https://open.spotify.com/search/${query}`;
+
+  const [itunes, youtubeVideoId] = await Promise.all([
+    getItunesLinks(artist, title),
+    getYoutubeVideoId(artist, title),
+  ]);
+
+  return {
+    appleMusic: itunes.appleMusic,
+    preview: itunes.preview,
+    youtubeVideoId,
+    spotify,
+  };
 }
 
 async function fetchPage(
@@ -167,3 +206,4 @@ export async function GET() {
 
   return NextResponse.json({ tracks });
 }
+
