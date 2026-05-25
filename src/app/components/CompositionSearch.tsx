@@ -49,8 +49,8 @@ export default function CompositionSearch() {
 
   function handleDiscover() {
     if (chips.length === 0) return;
-    const q = chips.map((c) => `track:${c.mbid}`).join(",");
-    router.push(`/tracks?q=${encodeURIComponent(q)}`);
+    const seeds = chips.map((c) => ({ t: c.label, a: c.sub ?? "" }));
+    router.push(`/tracks?q=${encodeURIComponent(JSON.stringify(seeds))}`);
   }
 
   return (

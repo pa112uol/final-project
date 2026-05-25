@@ -97,14 +97,22 @@ function TrackCard({ track }: { track: Track }) {
   );
 }
 
-export default function TracksList() {
+interface TracksListProps {
+  url?: string;
+  mode?: "random" | "recommendations";
+}
+
+export default function TracksList({
+  url = "/api/tracks",
+  mode = "random",
+}: TracksListProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   async function fetchTracks() {
     try {
-      const res = await fetch("/api/tracks");
+      const res = await fetch(url);
       if (!res.ok) throw new Error("Failed to load tracks");
       const data = await res.json();
       setTracks(data.tracks);
@@ -122,7 +130,9 @@ export default function TracksList() {
     }
 
     loadTracks();
-  }, []);
+    // url won't change after mount; effect runs once per page load
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
 
   function handleShuffle() {
     setLoading(true);
@@ -130,18 +140,21 @@ export default function TracksList() {
     fetchTracks();
   }
 
+  const title = mode === "recommendations" ? "Recommended for You" : "Random Tracks";
+  const buttonLabel = loading ? "Loading…" : mode === "recommendations" ? "Refresh" : "Shuffle";
+
   return (
     <>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-          Random Tracks
+          {title}
         </h1>
         <button
           onClick={handleShuffle}
           disabled={loading}
           className="rounded-full bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
         >
-          {loading ? "Loading…" : "Shuffle"}
+          {buttonLabel}
         </button>
       </div>
 
