@@ -61,7 +61,7 @@ function TrackCard({ track }: { track: Track }) {
         />
       )}
 
-      {!track.streaming.youtubeVideoId && track.streaming.preview && (
+      {track.streaming.preview && (
         <audio controls className="w-full" src={track.streaming.preview} />
       )}
 
@@ -125,12 +125,10 @@ export default function TracksList({
   }
 
   useEffect(() => {
-    async function loadTracks() {
-      await fetchTracks();
-    }
-
-    loadTracks();
-    // url won't change after mount; effect runs once per page load
+    setLoading(true);
+    setError(null);
+    fetchTracks();
+    // fetchTracks reads `url` from the closure; re-runs whenever url changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url]);
 
@@ -171,7 +169,11 @@ export default function TracksList({
         </div>
       )}
 
-      {!loading && (
+      {!loading && tracks.length === 0 && !error && (
+        <p className="text-sm text-zinc-500 dark:text-zinc-400">No tracks found. Try a different seed track or mood.</p>
+      )}
+
+      {!loading && tracks.length > 0 && (
         <div className="flex flex-col gap-4">
           {tracks.map((track) => (
             <TrackCard key={track.mbid} track={track} />

@@ -1,171 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
-import { mbFetch } from "../../lib/mb";
+import { getRecommendations, MOOD_TAGS, Seed } from "@/app/lib/recommendations";
 
-const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
-const ITUNES_BASE = "https://itunes.apple.com/search";
-const YOUTUBE_SEARCH_BASE = "https://www.googleapis.com/youtube/v3/search";
-const USER_AGENT = "NextTrack/1.0 (https://github.com/nexttrack)";
-const RECOMMENDATION_LIMIT = 10;
-
-interface MBArtistCredit {
-  artist: { id: string; name: string };
-  name: string;
-}
-
-interface MBRelease {
-  id: string;
-  title: string;
-  date?: string;
-}
-
-interface MBRecording {
-  id: string;
-  title: string;
-  length?: number;
-  "artist-credit"?: MBArtistCredit[];
-  releases?: MBRelease[];
-  "first-release-date"?: string;
-}
-
-interface StreamingLinks {
-  appleMusic: string | null;
-  preview: string | null;
-  youtubeVideoId: string | null;
-  spotify: string;
-}
-
-interface Track {
-  mbid: string;
-  title: string;
-  artist: string;
-  artistMbid: string;
-  durationMs: number | null;
-  firstReleaseDate: string | null;
-  releases: { mbid: string; title: string; date?: string }[];
-  streaming: StreamingLinks;
-}
-
-async function searchByArtists(artistNames: string[]): Promise<MBRecording[]> {
-  const query = artistNames.map((a) => `artist:"${a}"`).join(" OR ");
-  const url = new URL(`${MUSICBRAINZ_BASE}/recording`);
-  url.searchParams.set("query", query);
-  url.searchParams.set("limit", "50");
-  url.searchParams.set("inc", "artist-credits releases");
-  url.searchParams.set("fmt", "json");
-  const res = await mbFetch(url.toString());
-  if (!res.ok) return [];
-  const data: { recordings?: MBRecording[] } = await res.json();
-  return data.recordings ?? [];
-}
-
-function toTrackBase(r: MBRecording): Omit<Track, "streaming"> {
-  const credit = r["artist-credit"]?.[0];
-  return {
-    mbid: r.id,
-    title: r.title,
-    artist: credit?.name ?? credit?.artist.name ?? "Unknown",
-    artistMbid: credit?.artist.id ?? "",
-    durationMs: r.length ?? null,
-    firstReleaseDate: r["first-release-date"] ?? null,
-    releases: (r.releases ?? []).map((rel) => ({
-      mbid: rel.id,
-      title: rel.title,
-      date: rel.date,
-    })),
-  };
-}
-
-async function getItunesLinks(
-  artist: string,
-  title: string,
-): Promise<{ appleMusic: string | null; preview: string | null }> {
-  try {
-    const url = new URL(ITUNES_BASE);
-    url.searchParams.set("term", `${artist} ${title}`);
-    url.searchParams.set("entity", "song");
-    url.searchParams.set("limit", "1");
-    const res = await fetch(url.toString(), { headers: { "User-Agent": USER_AGENT } });
-    if (res.ok) {
-      const data: { results?: { trackViewUrl?: string; previewUrl?: string }[] } =
-        await res.json();
-      const result = data.results?.[0];
-      return {
-        appleMusic: result?.trackViewUrl ?? null,
-        preview: result?.previewUrl ?? null,
-      };
-    }
-  } catch {}
-  return { appleMusic: null, preview: null };
-}
-
-async function getYoutubeVideoId(artist: string, title: string): Promise<string | null> {
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) return null;
-  try {
-    const url = new URL(YOUTUBE_SEARCH_BASE);
-    url.searchParams.set("part", "snippet");
-    url.searchParams.set("q", `"${artist}" "${title}"`);
-    url.searchParams.set("type", "video");
-    url.searchParams.set("videoCategoryId", "10");
-    url.searchParams.set("maxResults", "1");
-    url.searchParams.set("key", apiKey);
-    const res = await fetch(url.toString());
-    if (res.ok) {
-      const data: { items?: { id?: { videoId?: string } }[] } = await res.json();
-      return data.items?.[0]?.id?.videoId ?? null;
-    }
-  } catch {}
-  return null;
-}
-
-async function getStreamingLinks(artist: string, title: string): Promise<StreamingLinks> {
-  const query = encodeURIComponent(`${artist} ${title}`);
-  const [itunes, youtubeVideoId] = await Promise.all([
-    getItunesLinks(artist, title),
-    getYoutubeVideoId(artist, title),
-  ]);
-  return {
-    appleMusic: itunes.appleMusic,
-    preview: itunes.preview,
-    youtubeVideoId,
-    spotify: `https://open.spotify.com/search/${query}`,
-  };
+function makeLogger(reqId: string, startMs: number) {
+  return (phase: string, data: unknown) =>
+    console.log(`[REC:${phase} ${reqId} +${Date.now() - startMs}ms]`, JSON.stringify(data));
 }
 
 export async function GET(req: NextRequest) {
-  const titles = req.nextUrl.searchParams.getAll("title");
-  const artists = req.nextUrl.searchParams.getAll("artist");
+  const startMs = Date.now();
+  const log = makeLogger(Math.random().toString(36).slice(2, 7), startMs);
 
-  if (titles.length === 0) {
-    return NextResponse.json({ error: "No seed tracks provided" }, { status: 400 });
+  const apiKey = process.env.LASTFM_API_KEY;
+  if (!apiKey) {
+    return NextResponse.json({ error: "LASTFM_API_KEY not set" }, { status: 500 });
   }
 
-  const seeds = titles.map((t, i) => ({
-    title: t.toLowerCase(),
-    artist: (artists[i] ?? "").toLowerCase(),
+  const sp = req.nextUrl.searchParams;
+  const mbids = sp.getAll("mbid");
+  const titles = sp.getAll("title");
+  const artists = sp.getAll("artist");
+  const mood = sp.get("mood")?.toLowerCase().trim() || undefined;
+  const noveltyRaw = parseFloat(sp.get("novelty") ?? "0");
+  const novelty = Number.isNaN(noveltyRaw) ? 0 : Math.max(0, Math.min(1, noveltyRaw));
+
+  if (mbids.length === 0) {
+    return NextResponse.json({ error: "No seed tracks provided" }, { status: 400 });
+  }
+  if (mood && !MOOD_TAGS[mood]) {
+    return NextResponse.json(
+      { error: `Unknown mood. Valid values: ${Object.keys(MOOD_TAGS).join(", ")}` },
+      { status: 400 },
+    );
+  }
+
+  const seeds: Seed[] = mbids.map((mbid, i) => ({
+    mbid,
+    title: (titles[i] ?? "").toLowerCase().trim(),
+    artist: (artists[i] ?? "").toLowerCase().trim(),
   }));
 
-  // Deduplicate artist names and search MB for recordings by those artists
-  const uniqueArtists = [...new Set(seeds.map((s) => s.artist).filter(Boolean))];
-  const candidates = await searchByArtists(uniqueArtists);
+  log("input", { seeds, mood: mood ?? null, novelty });
 
-  // Exclude exact seed tracks by title+artist match
-  const seedKeys = new Set(seeds.map((s) => `${s.title}|||${s.artist}`));
-  const filtered = candidates.filter((r) => {
-    const credit = r["artist-credit"]?.[0];
-    const artistName = (credit?.name ?? credit?.artist.name ?? "").toLowerCase();
-    const key = `${r.title.toLowerCase()}|||${artistName}`;
-    return !seedKeys.has(key);
-  });
+  const tracks = await getRecommendations(seeds, apiKey, mood, novelty);
 
-  const top = filtered.slice(0, RECOMMENDATION_LIMIT);
-
-  const tracks = await Promise.all(
-    top.map(async (recording) => {
-      const base = toTrackBase(recording);
-      return { ...base, streaming: await getStreamingLinks(base.artist, base.title) };
-    }),
-  );
+  log("result", { tracksReturned: tracks.length, totalMs: Date.now() - startMs });
 
   return NextResponse.json({ tracks });
 }

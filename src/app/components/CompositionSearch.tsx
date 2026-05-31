@@ -49,7 +49,7 @@ export default function CompositionSearch() {
 
   function handleDiscover() {
     if (chips.length === 0) return;
-    const seeds = chips.map((c) => ({ t: c.label, a: c.sub ?? "" }));
+    const seeds = chips.map((c) => ({ id: c.mbid, t: c.label, a: c.sub ?? "" }));
     router.push(`/tracks?q=${encodeURIComponent(JSON.stringify(seeds))}`);
   }
 
