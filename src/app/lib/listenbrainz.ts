@@ -60,15 +60,21 @@ export async function fetchRecordingPopularity(
   const validMbids = mbids.filter(Boolean);
   if (validMbids.length === 0) return new Map();
   try {
-    const res = await fetch(`${LB_BASE}/popularity/recording/`, {
+    const res = await fetch(`${LB_BASE}/popularity/recording`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
       body: JSON.stringify({ recording_mbids: validMbids }),
     });
-    if (!res.ok) return new Map();
+    if (!res.ok) {
+      console.warn(`[lb] fetchRecordingPopularity HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+      return new Map();
+    }
     const data = (await res.json()) as LBRecordingPopularity[];
-    return new Map(data.map((r) => [r.recording_mbid, r.total_listen_count]));
-  } catch {
+    const withData = data.filter((r) => r.total_listen_count !== null);
+    console.log(`[lb] fetchRecordingPopularity: ${withData.length}/${validMbids.length} mbids returned data`);
+    return new Map(withData.map((r) => [r.recording_mbid, r.total_listen_count]));
+  } catch (e) {
+    console.error("[lb] fetchRecordingPopularity failed:", e);
     return new Map();
   }
 }
@@ -79,15 +85,21 @@ export async function fetchArtistPopularity(
   const validMbids = artistMbids.filter(Boolean);
   if (validMbids.length === 0) return new Map();
   try {
-    const res = await fetch(`${LB_BASE}/popularity/artist/`, {
+    const res = await fetch(`${LB_BASE}/popularity/artist`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "User-Agent": USER_AGENT },
       body: JSON.stringify({ artist_mbids: validMbids }),
     });
-    if (!res.ok) return new Map();
+    if (!res.ok) {
+      console.warn(`[lb] fetchArtistPopularity HTTP ${res.status}: ${await res.text().catch(() => "")}`);
+      return new Map();
+    }
     const data = (await res.json()) as LBArtistPopularity[];
-    return new Map(data.map((r) => [r.artist_mbid, r.total_listen_count]));
-  } catch {
+    const withData = data.filter((r) => r.total_listen_count !== null);
+    console.log(`[lb] fetchArtistPopularity: ${withData.length}/${validMbids.length} mbids returned data`);
+    return new Map(withData.map((r) => [r.artist_mbid, r.total_listen_count]));
+  } catch (e) {
+    console.error("[lb] fetchArtistPopularity failed:", e);
     return new Map();
   }
 }
