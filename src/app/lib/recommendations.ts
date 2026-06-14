@@ -14,7 +14,7 @@ const RECOMMENDATION_LIMIT = 10;
 // LB tag counts are ~1-10; LF tag counts go up to 100. Scale LB up so they
 // dominate TF in buildTagWeights while still letting LF mood/vibe tags supplement.
 const LB_TAG_SCALE = 15;
-const TOP_TAGS_COUNT = 3;
+const TOP_TAGS_COUNT = 6;
 const ARTISTS_PER_TAG = 30;
 const TOP_ARTISTS_COUNT = 15;
 const TRACKS_PER_ARTIST = 5;
@@ -289,8 +289,7 @@ export async function getRecommendations(
 
   if (topTags.length === 0) return [];
 
-  const page = novelty < 0.34 ? 1 : novelty < 0.67 ? 2 : 3;
-  const candidateMap = await buildCandidates(topTags, page, apiKey);
+  const candidateMap = await buildCandidates(topTags, 1, apiKey);
 
   const seedTrackKeys = new Set(
     seeds.map((s) => `${s.title.toLowerCase()}|||${s.artist.toLowerCase()}`),
