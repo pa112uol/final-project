@@ -154,7 +154,6 @@ function buildTagWeights(
 
 async function buildCandidates(
   topTags: [string, number][],
-  page: number,
   apiKey: string,
 ): Promise<Map<string, Candidate>> {
   // Phase A: score artists by how many weighted tags they appear in
@@ -166,7 +165,7 @@ async function buildCandidates(
 
   await Promise.all(
     topTags.map(async ([tag, tagWeight]) => {
-      const artists = await fetchTagArtists(tag, page, ARTISTS_PER_TAG, apiKey);
+      const artists = await fetchTagArtists(tag, 1, ARTISTS_PER_TAG, apiKey);
       for (const artist of artists) {
         const key = artist.name.toLowerCase();
         const existing = artistScores.get(key);
@@ -289,7 +288,7 @@ export async function getRecommendations(
 
   if (topTags.length === 0) return [];
 
-  const candidateMap = await buildCandidates(topTags, 1, apiKey);
+  const candidateMap = await buildCandidates(topTags, apiKey);
 
   const seedTrackKeys = new Set(
     seeds.map((s) => `${s.title.toLowerCase()}|||${s.artist.toLowerCase()}`),
