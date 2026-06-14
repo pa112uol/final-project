@@ -170,6 +170,36 @@ function mmrSelect(ranked: ScoredCandidate[], k: number): ScoredCandidate[] {
   return selected;
 }
 
+function titlesOverlap(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [longer, shorter] = a.length >= b.length ? [a, b] : [b, a];
+  return longer.startsWith(shorter) && /^ [-(\[]/.test(longer.slice(shorter.length));
+}
+
+function filterSeeds(candidateMap: Map<string, Candidate>, seeds: Seed[]): void {
+  const normalizedSeeds = seeds.map((s) => ({
+    title: s.title.toLowerCase(),
+    artist: s.artist.toLowerCase(),
+  }));
+  for (const [key, c] of candidateMap) {
+    const ct = c.title.toLowerCase();
+    const ca = c.artist.toLowerCase();
+    if (normalizedSeeds.some((s) => s.artist === ca && titlesOverlap(s.title, ct))) {
+      candidateMap.delete(key);
+    }
+  }
+}
+
+function deduplicateByMbid(candidateMap: Map<string, Candidate>): void {
+  const seenMbids = new Set<string>();
+  for (const [key, c] of candidateMap) {
+    if (c.mbid) {
+      if (seenMbids.has(c.mbid)) candidateMap.delete(key);
+      else seenMbids.add(c.mbid);
+    }
+  }
+}
+
 function mergeTags(
   lbTags: { name: string; count: number }[],
   lfTags: LFTag[],
@@ -316,8 +346,7 @@ function scoreAndSort(
           : c.artistListenCount > 0
             ? 1 - c.artistListenCount / maxArtistListenCount
             : 0.5;
-      const noveltyScore = popularityObscurity;
-      const finalScore = (1 - novelty) * relevanceNorm + novelty * noveltyScore;
+      const finalScore = (1 - novelty) * relevanceNorm + novelty * popularityObscurity;
       return { ...c, finalScore };
     })
     .sort((a, b) => b.finalScore - a.finalScore);
@@ -366,12 +395,8 @@ export async function getRecommendations(
 
   const candidateMap = await buildCandidates(fetchTags, apiKey);
 
-  const seedTrackKeys = new Set(
-    seeds.map((s) => `${s.title.toLowerCase()}|||${s.artist.toLowerCase()}`),
-  );
-  for (const [key] of candidateMap) {
-    if (seedTrackKeys.has(key)) candidateMap.delete(key);
-  }
+  filterSeeds(candidateMap, seeds);
+  deduplicateByMbid(candidateMap);
 
   const mbids = [...candidateMap.values()].map((c) => c.mbid).filter(Boolean);
   const lbPopularity = await fetchRecordingPopularity(mbids);
