@@ -24,6 +24,8 @@ interface Track {
   firstReleaseDate: string | null;
   releases: Release[];
   streaming: StreamingLinks;
+  relevanceScore: number;
+  noveltyScore: number;
 }
 
 function formatDuration(ms: number): string {
@@ -32,6 +34,7 @@ function formatDuration(ms: number): string {
   const s = total % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
+
 
 function TrackCard({ track, index }: { track: Track; index: number }) {
   return (
@@ -111,21 +114,20 @@ function TrackCard({ track, index }: { track: Track; index: number }) {
 interface TracksListProps {
   url?: string;
   mode?: "random" | "recommendations";
+  onRefresh?: () => void;
 }
 
 export default function TracksList({
   url = "/api/tracks",
   mode = "random",
+  onRefresh,
 }: TracksListProps) {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [fetchCount, setFetchCount] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
 
     fetch(url, { signal: controller.signal })
       .then((res) => {
@@ -135,18 +137,19 @@ export default function TracksList({
       .then((data) => {
         setTracks(data.tracks);
         setError(null);
+        setLoading(false);
       })
       .catch((err: unknown) => {
         if (err instanceof Error && err.name === "AbortError") return;
         setError("Could not load tracks. Please try again.");
-      })
-      .finally(() => setLoading(false));
+        setLoading(false);
+      });
 
     return () => controller.abort();
-  }, [url, fetchCount]);
+  }, [url]);
 
   function handleShuffle() {
-    setFetchCount((n) => n + 1);
+    onRefresh?.();
   }
 
   const isRecommendations = mode === "recommendations";
@@ -186,10 +189,13 @@ export default function TracksList({
 
       {loading && (
         <div className="flex flex-col gap-4">
+          <p className="text-sm text-slate-500 animate-pulse">
+            {isRecommendations ? "Analysing your taste…" : "Discovering tracks…"}
+          </p>
           {Array.from({ length: 5 }).map((_, i) => (
             <div
               key={i}
-              className="h-64 animate-pulse rounded-2xl border border-white/5 bg-white/[0.03]"
+              className="h-24 animate-pulse rounded-2xl border border-white/5 bg-white/[0.03]"
             />
           ))}
         </div>

@@ -3,12 +3,27 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 
-const TracksList = dynamic(() => import("./TracksList"), { ssr: false });
+function TracksListSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="animate-pulse text-sm text-slate-500">Analysing your taste…</p>
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div key={i} className="h-24 animate-pulse rounded-2xl border border-white/5 bg-white/[0.03]" />
+      ))}
+    </div>
+  );
+}
+
+const TracksList = dynamic(() => import("./TracksList"), {
+  ssr: false,
+  loading: TracksListSkeleton,
+});
 
 const MOODS = [
   "happy", "sad", "energetic", "chill",
   "angry", "melancholic", "romantic", "focus",
 ] as const;
+
 
 interface Seed {
   id: string; // recording mbid
@@ -36,6 +51,7 @@ function noveltyLabel(v: number): string {
 
 export default function TracksListWrapper({ selections }: { selections?: string }) {
   const [mood, setMood] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
   // novelty controls two states: display (tracks slider position live) and
   // committed (triggers a re-fetch only when the user releases the slider)
   const [noveltyDisplay, setNoveltyDisplay] = useState(0);
@@ -49,7 +65,12 @@ export default function TracksListWrapper({ selections }: { selections?: string 
   }
 
   if (seeds.length === 0) {
-    return <TracksList />;
+    return (
+      <TracksList
+        key={refreshKey}
+        onRefresh={() => setRefreshKey((k) => k + 1)}
+      />
+    );
   }
 
   const url = buildUrl(seeds, mood, noveltyCommitted);
@@ -99,7 +120,12 @@ export default function TracksListWrapper({ selections }: { selections?: string 
         </div>
       </div>
 
-      <TracksList url={url} mode="recommendations" />
+      <TracksList
+        key={`${url}-${refreshKey}`}
+        url={url}
+        mode="recommendations"
+        onRefresh={() => setRefreshKey((k) => k + 1)}
+      />
     </div>
   );
 }
