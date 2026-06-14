@@ -21,6 +21,66 @@ const TRACKS_PER_ARTIST = 5;
 const MOOD_BOOST_WEIGHT = 1_000;
 const MMR_LAMBDA = 0.7;
 
+// Last.fm user-collection tags — describe listening habits, not musical content.
+const NOISE_TAGS = new Set([
+  "seen live",
+  "favorites",
+  "favourite",
+  "love",
+  "awesome",
+  "good",
+  "amazing",
+  "beautiful",
+  "cool",
+  "songs i like",
+  "favourite songs",
+  "under 2000 listeners",
+  "all",
+  "music",
+]);
+
+// Genre roots, compound genre labels one level above sub-genre, and decade tags
+// are excluded from candidate fetching — they pull in stylistically unrelated
+// artists. Only sub-genre and scene tags (e.g. "britpop", "shoegaze") are used.
+const BROAD_FETCH_TAGS = new Set([
+  "rock",
+  "pop",
+  "alternative",
+  "indie",
+  "metal",
+  "electronic",
+  "folk",
+  "jazz",
+  "classical",
+  "punk",
+  "dance",
+  "hip hop",
+  "hip-hop",
+  "r&b",
+  "rap",
+  "country",
+  "soul",
+  "blues",
+  "reggae",
+  "latin",
+  "classic rock",
+  "alternative rock",
+  "indie rock",
+  "indie pop",
+  "art rock",
+  "hard rock",
+  "soft rock",
+  "progressive rock",
+  "60s",
+  "70s",
+  "80s",
+  "90s",
+  "00s",
+  "2000s",
+  "2010s",
+  "2020s",
+]);
+
 export const MOOD_TAGS: Record<string, string[]> = {
   happy: ["happy", "upbeat", "feel good"],
   sad: ["sad", "melancholic", "emotional"],
@@ -116,12 +176,12 @@ function mergeTags(
 ): LFTag[] {
   const merged = new Map<string, number>();
   for (const { name, count } of lbTags) {
-    merged.set(name, count * LB_TAG_SCALE);
+    if (!NOISE_TAGS.has(name)) merged.set(name, count * LB_TAG_SCALE);
   }
   // Last.fm supplements with mood/vibe tags absent from LB; if tag is already
   // present from LB, keep the boosted LB weight.
   for (const { name, count } of lfTags) {
-    if (!merged.has(name)) merged.set(name, count);
+    if (!NOISE_TAGS.has(name) && !merged.has(name)) merged.set(name, count);
   }
   return [...merged.entries()].map(([name, count]) => ({ name, count }));
 }
@@ -208,9 +268,6 @@ async function buildCandidates(
         TRACKS_PER_ARTIST,
         apiKey,
       );
-      // Each track inherits all the matched tags of its artist, which is a signal of relevance to the seed set.
-      // LB tag weights are already summed at the artist level.
-      // For LF, just count how many top tags matched since we don't have tag counts for artists.
       const matchedTags = [
         ...(artistTags.get(artist.name.toLowerCase()) ?? []),
       ];
@@ -297,14 +354,25 @@ export async function getRecommendations(
   console.log("[tags] merged lb+lastfm tags\n" + lfTagsSummary.join("\n"));
 
   const tagWeights = buildTagWeights(seedTagSets, mood);
+  const sortedTags = [...tagWeights.entries()].sort((a, b) => b[1] - a[1]);
 
-  const topTags = [...tagWeights.entries()]
-    .sort((a, b) => b[1] - a[1])
+  if (sortedTags.length === 0) return [];
+
+  // Prefer specific tags for fetching; fall back to broad ones only when
+  // fewer than 2 specific tags exist (e.g. a pure rock seed with no sub-genre).
+  let fetchTags = sortedTags
+    .filter(([tag]) => !BROAD_FETCH_TAGS.has(tag))
     .slice(0, TOP_TAGS_COUNT);
+  if (fetchTags.length < 2) {
+    fetchTags = sortedTags.slice(0, TOP_TAGS_COUNT);
+  }
 
-  if (topTags.length === 0) return [];
+  console.log(
+    "[tags] fetch tags:",
+    fetchTags.map(([t, w]) => `${t}(${w.toFixed(0)})`).join(", "),
+  );
 
-  const candidateMap = await buildCandidates(topTags, apiKey);
+  const candidateMap = await buildCandidates(fetchTags, apiKey);
 
   const seedTrackKeys = new Set(
     seeds.map((s) => `${s.title.toLowerCase()}|||${s.artist.toLowerCase()}`),
