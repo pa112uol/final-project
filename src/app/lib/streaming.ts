@@ -40,7 +40,10 @@ async function fetchItunesLinks(
   }
 }
 
-async function fetchYoutubeVideoId(artist: string, title: string): Promise<string | null> {
+async function fetchYoutubeVideoId(
+  artist: string,
+  title: string,
+): Promise<string | null> {
   const apiKey = process.env.YOUTUBE_API_KEY;
   if (!apiKey) return null;
   try {
@@ -76,3 +79,4 @@ export async function getStreamingLinks(
     spotify: `https://open.spotify.com/search/${query}`,
   };
 }
+

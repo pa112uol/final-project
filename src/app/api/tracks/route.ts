@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { mbFetch } from "../../lib/mb";
+import { getStreamingLinks, StreamingLinks } from "../../lib/streaming";
 
 const MUSICBRAINZ_BASE = "https://musicbrainz.org/ws/2";
-const ITUNES_BASE = "https://itunes.apple.com/search";
-const YOUTUBE_SEARCH_BASE = "https://www.googleapis.com/youtube/v3/search";
 const USER_AGENT = "NextTrack/1.0 (https://github.com/nexttrack)";
 const RESPONSE_LIMIT = 5;
 const CACHE_TTL_MS = 60_000;
@@ -26,13 +25,6 @@ interface MBRecording {
   "artist-credit"?: MBArtistCredit[];
   releases?: MBRelease[];
   "first-release-date"?: string;
-}
-
-interface StreamingLinks {
-  appleMusic: string | null;
-  preview: string | null;
-  youtubeVideoId: string | null;
-  spotify: string;
 }
 
 interface Track {
@@ -71,81 +63,6 @@ function toBaseTrack(recording: MBRecording): Omit<Track, "streaming"> {
       title: r.title,
       date: r.date,
     })),
-  };
-}
-
-async function getItunesLinks(
-  artist: string,
-  title: string,
-): Promise<{ appleMusic: string | null; preview: string | null }> {
-  try {
-    const url = new URL(ITUNES_BASE);
-    url.searchParams.set("term", `${artist} ${title}`);
-    url.searchParams.set("entity", "song");
-    url.searchParams.set("limit", "1");
-
-    const res = await fetch(url.toString(), {
-      headers: { "User-Agent": USER_AGENT },
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      const result = data.results?.[0];
-      return {
-        appleMusic: result?.trackViewUrl ?? null,
-        preview: result?.previewUrl ?? null,
-      };
-    }
-  } catch {}
-
-  return { appleMusic: null, preview: null };
-}
-
-async function getYoutubeVideoId(
-  artist: string,
-  title: string,
-): Promise<string | null> {
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) return null;
-
-  try {
-    const url = new URL(YOUTUBE_SEARCH_BASE);
-    url.searchParams.set("part", "snippet");
-    // Search for an exact match of "artist title" to increase chances of getting the correct video
-    url.searchParams.set("q", `"${artist}" "${title}"`);
-    url.searchParams.set("type", "video");
-    // Filter by music category to improve relevance
-    url.searchParams.set("videoCategoryId", "10");
-    url.searchParams.set("maxResults", "1");
-    url.searchParams.set("key", apiKey);
-
-    const res = await fetch(url.toString());
-    if (res.ok) {
-      const data = await res.json();
-      return data.items?.[0]?.id?.videoId ?? null;
-    }
-  } catch {}
-
-  return null;
-}
-
-async function getStreamingLinks(
-  artist: string,
-  title: string,
-): Promise<StreamingLinks> {
-  const query = encodeURIComponent(`${artist} ${title}`);
-  const spotify = `https://open.spotify.com/search/${query}`;
-
-  const [itunes, youtubeVideoId] = await Promise.all([
-    getItunesLinks(artist, title),
-    getYoutubeVideoId(artist, title),
-  ]);
-
-  return {
-    appleMusic: itunes.appleMusic,
-    preview: itunes.preview,
-    youtubeVideoId,
-    spotify,
   };
 }
 
