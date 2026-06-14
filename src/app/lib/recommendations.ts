@@ -7,14 +7,19 @@ import {
 import {
   fetchArtistPopularity,
   fetchRecordingPopularity,
+  fetchRecordingTags,
 } from "@/app/lib/listenbrainz";
 import { getStreamingLinks, StreamingLinks } from "@/app/lib/streaming";
 const RECOMMENDATION_LIMIT = 10;
+// LB tag counts are ~1-10; LF tag counts go up to 100. Scale LB up so they
+// dominate TF in buildTagWeights while still letting LF mood/vibe tags supplement.
+const LB_TAG_SCALE = 15;
 const TOP_TAGS_COUNT = 3;
 const ARTISTS_PER_TAG = 30;
 const TOP_ARTISTS_COUNT = 15;
 const TRACKS_PER_ARTIST = 5;
 const MOOD_BOOST_WEIGHT = 1_000;
+const MMR_LAMBDA = 0.7;
 
 export const MOOD_TAGS: Record<string, string[]> = {
   happy: ["happy", "upbeat", "feel good"],
@@ -55,10 +60,61 @@ interface Candidate {
   occurrences: number;
   listenCount: number;
   artistListenCount: number;
+  tags: string[];
 }
 
 interface ScoredCandidate extends Candidate {
   finalScore: number;
+}
+
+function jaccardSimilarity(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  const setB = new Set(b);
+  let intersection = 0;
+  for (const tag of a) {
+    if (setB.has(tag)) intersection++;
+  }
+  return intersection / (a.length + b.length - intersection);
+}
+
+function mmrSelect(ranked: ScoredCandidate[], k: number): ScoredCandidate[] {
+  const selected: ScoredCandidate[] = [];
+  const remaining = [...ranked];
+  while (selected.length < k && remaining.length > 0) {
+    let bestIdx = 0;
+    let bestScore = -Infinity;
+    for (let i = 0; i < remaining.length; i++) {
+      const c = remaining[i];
+      const maxSim =
+        selected.length === 0
+          ? 0
+          : Math.max(...selected.map((s) => jaccardSimilarity(c.tags, s.tags)));
+      const score = MMR_LAMBDA * c.finalScore - (1 - MMR_LAMBDA) * maxSim;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    selected.push(remaining[bestIdx]);
+    remaining.splice(bestIdx, 1);
+  }
+  return selected;
+}
+
+function mergeTags(
+  lbTags: { name: string; count: number }[],
+  lfTags: LFTag[],
+): LFTag[] {
+  const merged = new Map<string, number>();
+  for (const { name, count } of lbTags) {
+    merged.set(name, count * LB_TAG_SCALE);
+  }
+  // Last.fm supplements with mood/vibe tags absent from LB; if tag is already
+  // present from LB, keep the boosted LB weight.
+  for (const { name, count } of lfTags) {
+    if (!merged.has(name)) merged.set(name, count);
+  }
+  return [...merged.entries()].map(([name, count]) => ({ name, count }));
 }
 
 function buildTagWeights(
@@ -106,6 +162,7 @@ async function buildCandidates(
     string,
     { name: string; tagWeightSum: number }
   >();
+  const artistTags = new Map<string, Set<string>>();
 
   await Promise.all(
     topTags.map(async ([tag, tagWeight]) => {
@@ -118,6 +175,8 @@ async function buildCandidates(
         } else {
           artistScores.set(key, { name: artist.name, tagWeightSum: tagWeight });
         }
+        if (!artistTags.has(key)) artistTags.set(key, new Set());
+        artistTags.get(key)!.add(tag);
       }
     }),
   );
@@ -154,6 +213,7 @@ async function buildCandidates(
           occurrences: 1,
           listenCount: 0,
           artistListenCount: 0,
+          tags: [...(artistTags.get(artist.name.toLowerCase()) ?? [])],
         });
       }
     }),
@@ -193,12 +253,7 @@ function scoreAndSort(
       // Multiplicative: a track must be BOTH relatively unknown AND rare across tags.
       // Additive would let cross-tag rarity compensate for high listen counts.
       const noveltyScore = popularityObscurity * rarityObscurity;
-      // At novelty=0: sort purely by relevance.
-      // At novelty=0.5: novelty acts as a soft popularity penalty on the relevance term.
-      // At novelty=1: sort purely by obscurity.
-      const finalScore =
-        (1 - novelty) * relevanceNorm * (1 - novelty * noveltyScore) +
-        novelty * noveltyScore;
+      const finalScore = (1 - novelty) * relevanceNorm + novelty * noveltyScore;
       return { ...c, finalScore };
     })
     .sort((a, b) => b.finalScore - a.finalScore);
@@ -211,16 +266,20 @@ export async function getRecommendations(
   novelty = 0,
 ): Promise<Track[]> {
   const seedTagSets = await Promise.all(
-    seeds.map((s) =>
-      fetchSeedTags(s.title, s.artist, apiKey, s.mbid || undefined),
-    ),
+    seeds.map(async (s) => {
+      const [lbTags, lfTags] = await Promise.all([
+        s.mbid ? fetchRecordingTags(s.mbid) : Promise.resolve([]),
+        fetchSeedTags(s.title, s.artist, apiKey, s.mbid || undefined),
+      ]);
+      return mergeTags(lbTags, lfTags);
+    }),
   );
 
   const lfTagsSummary = seedTagSets.map(
     (tags: LFTag[], i: number) =>
       `  seed[${i}] (${seeds[i].title} – ${seeds[i].artist}): ${tags.map((t: LFTag) => `${t.name}(${t.count})`).join(", ") || "(none)"}`,
   );
-  console.log("[tags] lastfm track.getTopTags\n" + lfTagsSummary.join("\n"));
+  console.log("[tags] merged lb+lastfm tags\n" + lfTagsSummary.join("\n"));
 
   const tagWeights = buildTagWeights(seedTagSets, mood);
 
@@ -233,9 +292,11 @@ export async function getRecommendations(
   const page = novelty < 0.34 ? 1 : novelty < 0.67 ? 2 : 3;
   const candidateMap = await buildCandidates(topTags, page, apiKey);
 
-  const seedArtists = new Set(seeds.map((s) => s.artist.toLowerCase()));
-  for (const [key, c] of candidateMap) {
-    if (seedArtists.has(c.artist.toLowerCase())) candidateMap.delete(key);
+  const seedTrackKeys = new Set(
+    seeds.map((s) => `${s.title.toLowerCase()}|||${s.artist.toLowerCase()}`),
+  );
+  for (const [key] of candidateMap) {
+    if (seedTrackKeys.has(key)) candidateMap.delete(key);
   }
 
   const mbids = [...candidateMap.values()].map((c) => c.mbid).filter(Boolean);
@@ -260,15 +321,16 @@ export async function getRecommendations(
   }
 
   const artistTrackCount = new Map<string, number>();
-  const top = scoreAndSort([...candidateMap.values()], novelty)
-    .filter((c) => {
+  const top = mmrSelect(
+    scoreAndSort([...candidateMap.values()], novelty).filter((c) => {
       const key = c.artist.toLowerCase();
       const count = artistTrackCount.get(key) ?? 0;
       if (count >= 1) return false;
       artistTrackCount.set(key, count + 1);
       return true;
-    })
-    .slice(0, RECOMMENDATION_LIMIT);
+    }),
+    RECOMMENDATION_LIMIT,
+  );
 
   return Promise.all(
     top.map(
