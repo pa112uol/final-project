@@ -13,13 +13,22 @@ export interface LFTrack {
   artist: { name: string; mbid?: string };
 }
 
-async function lfFetch<T>(params: Record<string, string>, apiKey: string): Promise<T | null> {
+export interface LFSimilarTrack extends LFTrack {
+  match: number;
+}
+
+async function lfFetch<T>(
+  params: Record<string, string>,
+  apiKey: string,
+): Promise<T | null> {
   const url = new URL(LASTFM_BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("format", "json");
   try {
-    const res = await fetch(url.toString(), { headers: { "User-Agent": USER_AGENT } });
+    const res = await fetch(url.toString(), {
+      headers: { "User-Agent": USER_AGENT },
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
@@ -31,11 +40,19 @@ function parseTags(raw: unknown): LFTag[] {
   if (!raw) return [];
   const arr = Array.isArray(raw) ? raw : [raw];
   return (arr as { name?: string; count?: unknown }[])
-    .map((t) => ({ name: (t.name ?? "").toLowerCase().trim(), count: Number(t.count) }))
+    .map((t) => ({
+      name: (t.name ?? "").toLowerCase().trim(),
+      count: Number(t.count),
+    }))
     .filter((t) => t.name.length > 0);
 }
 
-export async function fetchSeedTags(
+/**
+ * Top tags for a track, falling back to the artist's tags when Last.fm has none
+ * for the track (common for deep cuts). Used for both seed profiling and scoring
+ * candidate relevance at the track level.
+ */
+export async function fetchTrackTags(
   title: string,
   artist: string,
   apiKey: string,
@@ -49,7 +66,10 @@ export async function fetchSeedTags(
   };
   if (mbid) params.mbid = mbid;
 
-  const trackData = await lfFetch<{ toptags?: { tag?: unknown } }>(params, apiKey);
+  const trackData = await lfFetch<{ toptags?: { tag?: unknown } }>(
+    params,
+    apiKey,
+  );
   const trackTags = parseTags(trackData?.toptags?.tag);
   if (trackTags.length > 0) return trackTags;
 
@@ -59,7 +79,6 @@ export async function fetchSeedTags(
   );
   return parseTags(artistData?.toptags?.tag);
 }
-
 
 export interface LFArtist {
   name: string;
@@ -73,7 +92,12 @@ export async function fetchTagArtists(
   apiKey: string,
 ): Promise<LFArtist[]> {
   const data = await lfFetch<{ topartists?: { artist?: unknown } }>(
-    { method: "tag.getTopArtists", tag, limit: String(limit), page: String(page) },
+    {
+      method: "tag.getTopArtists",
+      tag,
+      limit: String(limit),
+      page: String(page),
+    },
     apiKey,
   );
   const raw = data?.topartists?.artist;
@@ -90,7 +114,12 @@ export async function fetchArtistTopTracks(
   apiKey: string,
 ): Promise<LFTrack[]> {
   const data = await lfFetch<{ toptracks?: { track?: unknown } }>(
-    { method: "artist.getTopTracks", artist, limit: String(limit), autocorrect: "1" },
+    {
+      method: "artist.getTopTracks",
+      artist,
+      limit: String(limit),
+      autocorrect: "1",
+    },
     apiKey,
   );
   const raw = data?.toptracks?.track;
@@ -98,3 +127,50 @@ export async function fetchArtistTopTracks(
   const arr = Array.isArray(raw) ? raw : [raw];
   return arr as LFTrack[];
 }
+
+function parseTracks(raw: unknown): LFTrack[] {
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  return (arr as LFTrack[]).filter((t) => t?.name && t.artist?.name);
+}
+
+export async function fetchTagTracks(
+  tag: string,
+  limit: number,
+  apiKey: string,
+): Promise<LFTrack[]> {
+  const data = await lfFetch<{ tracks?: { track?: unknown } }>(
+    { method: "tag.getTopTracks", tag, limit: String(limit) },
+    apiKey,
+  );
+  return parseTracks(data?.tracks?.track);
+}
+
+export async function fetchSimilarTracks(
+  title: string,
+  artist: string,
+  limit: number,
+  apiKey: string,
+  mbid?: string,
+): Promise<LFSimilarTrack[]> {
+  const params: Record<string, string> = {
+    method: "track.getSimilar",
+    track: title,
+    artist,
+    limit: String(limit),
+    autocorrect: "1",
+  };
+  if (mbid) params.mbid = mbid;
+
+  const data = await lfFetch<{ similartracks?: { track?: unknown } }>(
+    params,
+    apiKey,
+  );
+  const raw = data?.similartracks?.track;
+  if (!raw) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  return (arr as (LFTrack & { match?: unknown })[])
+    .filter((t) => t?.name && t.artist?.name)
+    .map((t) => ({ ...t, match: Number(t.match) || 0 }));
+}
+

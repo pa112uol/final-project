@@ -1,6 +1,6 @@
 import {
   fetchArtistTopTracks,
-  fetchSeedTags,
+  fetchTrackTags,
   fetchTagArtists,
   LFTag,
 } from "@/app/lib/lastfm";
@@ -56,7 +56,6 @@ interface Candidate {
   mbid: string;
   durationMs: number | null;
   tagWeightSum: number;
-  rankSum: number;
   listenCount: number;
   artistListenCount: number;
   tags: string[];
@@ -215,7 +214,7 @@ async function buildCandidates(
       const matchedTags = [
         ...(artistTags.get(artist.name.toLowerCase()) ?? []),
       ];
-      for (const [idx, t] of tracks.entries()) {
+      for (const t of tracks) {
         const key = `${t.name.toLowerCase()}|||${artist.name.toLowerCase()}`;
         candidates.set(key, {
           title: t.name,
@@ -224,7 +223,6 @@ async function buildCandidates(
           mbid: t.mbid ?? "",
           durationMs: t.duration ? Number(t.duration) * 1000 : null,
           tagWeightSum: artist.tagWeightSum,
-          rankSum: idx + 1,
           listenCount: 0,
           artistListenCount: 0,
           tags: matchedTags,
@@ -286,7 +284,7 @@ export async function getRecommendations(
     seeds.map(async (s) => {
       const [lbTags, lfTags] = await Promise.all([
         s.mbid ? fetchRecordingTags(s.mbid) : Promise.resolve([]),
-        fetchSeedTags(s.title, s.artist, apiKey, s.mbid || undefined),
+        fetchTrackTags(s.title, s.artist, apiKey, s.mbid || undefined),
       ]);
       return mergeTags(lbTags, lfTags);
     }),
@@ -341,7 +339,7 @@ export async function getRecommendations(
     scoreAndSort([...candidateMap.values()], novelty).filter((c) => {
       const key = c.artist.toLowerCase();
       const count = artistTrackCount.get(key) ?? 0;
-      if (count >= 1) return false;
+      if (count >= 2) return false;
       artistTrackCount.set(key, count + 1);
       return true;
     }),
