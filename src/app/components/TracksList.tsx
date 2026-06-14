@@ -120,33 +120,33 @@ export default function TracksList({
   const [tracks, setTracks] = useState<Track[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  async function fetchTracks() {
-    try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("Failed to load tracks");
-      const data = await res.json();
-      setTracks(data.tracks);
-      setError(null);
-    } catch {
-      setError("Could not load tracks. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const [fetchCount, setFetchCount] = useState(0);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetchTracks();
-    // fetchTracks reads `url` from the closure; re-runs whenever url changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [url]);
+
+    fetch(url, { signal: controller.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to load tracks");
+        return res.json();
+      })
+      .then((data) => {
+        setTracks(data.tracks);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return;
+        setError("Could not load tracks. Please try again.");
+      })
+      .finally(() => setLoading(false));
+
+    return () => controller.abort();
+  }, [url, fetchCount]);
 
   function handleShuffle() {
-    setLoading(true);
-    setError(null);
-    fetchTracks();
+    setFetchCount((n) => n + 1);
   }
 
   const isRecommendations = mode === "recommendations";

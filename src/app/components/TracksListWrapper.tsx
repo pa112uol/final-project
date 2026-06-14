@@ -90,6 +90,7 @@ export default function TracksListWrapper({ selections }: { selections?: string 
             onChange={(e) => setNoveltyDisplay(Number(e.target.value))}
             onMouseUp={(e) => setNoveltyCommitted(Number((e.target as HTMLInputElement).value))}
             onTouchEnd={(e) => setNoveltyCommitted(Number((e.target as HTMLInputElement).value))}
+            onKeyUp={(e) => setNoveltyCommitted(Number((e.target as HTMLInputElement).value))}
             className="w-28 accent-violet-500"
           />
           <span className="w-14 text-xs text-slate-500">
