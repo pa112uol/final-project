@@ -57,7 +57,6 @@ interface Candidate {
   durationMs: number | null;
   tagWeightSum: number;
   rankSum: number;
-  occurrences: number;
   listenCount: number;
   artistListenCount: number;
   tags: string[];
@@ -210,6 +209,12 @@ async function buildCandidates(
         TRACKS_PER_ARTIST,
         apiKey,
       );
+      // Each track inherits all the matched tags of its artist, which is a signal of relevance to the seed set.
+      // LB tag weights are already summed at the artist level.
+      // For LF, just count how many top tags matched since we don't have tag counts for artists.
+      const matchedTags = [
+        ...(artistTags.get(artist.name.toLowerCase()) ?? []),
+      ];
       for (const [idx, t] of tracks.entries()) {
         const key = `${t.name.toLowerCase()}|||${artist.name.toLowerCase()}`;
         candidates.set(key, {
@@ -220,10 +225,9 @@ async function buildCandidates(
           durationMs: t.duration ? Number(t.duration) * 1000 : null,
           tagWeightSum: artist.tagWeightSum,
           rankSum: idx + 1,
-          occurrences: 1,
           listenCount: 0,
           artistListenCount: 0,
-          tags: [...(artistTags.get(artist.name.toLowerCase()) ?? [])],
+          tags: matchedTags,
         });
       }
     }),
@@ -238,7 +242,7 @@ function scoreAndSort(
 ): ScoredCandidate[] {
   if (candidates.length === 0) return [];
   const maxRelevance = Math.max(...candidates.map((c) => c.tagWeightSum));
-  const maxOccurrences = Math.max(...candidates.map((c) => c.occurrences));
+  const maxTagBreadth = Math.max(...candidates.map((c) => c.tags.length));
   const maxListenCount = Math.max(...candidates.map((c) => c.listenCount), 1);
   const maxArtistListenCount = Math.max(
     ...candidates.map((c) => c.artistListenCount),
@@ -249,7 +253,7 @@ function scoreAndSort(
     .map((c): ScoredCandidate => {
       const relevanceNorm =
         maxRelevance > 0 ? c.tagWeightSum / maxRelevance : 0;
-      // Three-tier popularity signal: recording count → artist count → neutral 0.5.
+      // Three-tier popularity signal: recording count => artist count => neutral 0.5.
       // 0.5 neutral avoids making a famous band look obscure just because Last.fm
       // omitted its MBID and neither LB endpoint had data for it.
       const popularityObscurity =
@@ -258,8 +262,11 @@ function scoreAndSort(
           : c.artistListenCount > 0
             ? 1 - c.artistListenCount / maxArtistListenCount
             : 0.5;
+      // Cross-tag rarity: an artist matching many of the seed's top tags is a
+      // central/generic match (less novel). One matching a single tag is a rarer,
+      // more surprising connection (more novel). c.tags is the set of top tags hit.
       const rarityObscurity =
-        maxOccurrences > 1 ? 1 - (c.occurrences - 1) / (maxOccurrences - 1) : 1;
+        maxTagBreadth > 1 ? 1 - (c.tags.length - 1) / (maxTagBreadth - 1) : 1;
       // Multiplicative: a track must be BOTH relatively unknown AND rare across tags.
       // Additive would let cross-tag rarity compensate for high listen counts.
       const noveltyScore = popularityObscurity * rarityObscurity;
