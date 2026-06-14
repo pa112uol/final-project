@@ -67,14 +67,25 @@ interface ScoredCandidate extends Candidate {
   finalScore: number;
 }
 
+function tokenize(tags: string[]): Set<string> {
+  const tokens = new Set<string>();
+  for (const tag of tags) {
+    for (const word of tag.toLowerCase().split(/\s+/)) {
+      if (word) tokens.add(word);
+    }
+  }
+  return tokens;
+}
+
 function jaccardSimilarity(a: string[], b: string[]): number {
   if (a.length === 0 || b.length === 0) return 0;
-  const setB = new Set(b);
+  const tokensA = tokenize(a);
+  const tokensB = tokenize(b);
   let intersection = 0;
-  for (const tag of a) {
-    if (setB.has(tag)) intersection++;
+  for (const token of tokensA) {
+    if (tokensB.has(token)) intersection++;
   }
-  return intersection / (a.length + b.length - intersection);
+  return intersection / (tokensA.size + tokensB.size - intersection);
 }
 
 function mmrSelect(ranked: ScoredCandidate[], k: number): ScoredCandidate[] {
