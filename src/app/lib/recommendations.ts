@@ -297,7 +297,6 @@ function scoreAndSort(
 ): ScoredCandidate[] {
   if (candidates.length === 0) return [];
   const maxRelevance = Math.max(...candidates.map((c) => c.tagWeightSum));
-  const maxTagBreadth = Math.max(...candidates.map((c) => c.tags.length));
   const maxListenCount = Math.max(...candidates.map((c) => c.listenCount), 1);
   const maxArtistListenCount = Math.max(
     ...candidates.map((c) => c.artistListenCount),
@@ -317,14 +316,7 @@ function scoreAndSort(
           : c.artistListenCount > 0
             ? 1 - c.artistListenCount / maxArtistListenCount
             : 0.5;
-      // Cross-tag rarity: an artist matching many of the seed's top tags is a
-      // central/generic match (less novel). One matching a single tag is a rarer,
-      // more surprising connection (more novel). c.tags is the set of top tags hit.
-      const rarityObscurity =
-        maxTagBreadth > 1 ? 1 - (c.tags.length - 1) / (maxTagBreadth - 1) : 1;
-      // Multiplicative: a track must be BOTH relatively unknown AND rare across tags.
-      // Additive would let cross-tag rarity compensate for high listen counts.
-      const noveltyScore = popularityObscurity * rarityObscurity;
+      const noveltyScore = popularityObscurity;
       const finalScore = (1 - novelty) * relevanceNorm + novelty * noveltyScore;
       return { ...c, finalScore };
     })
