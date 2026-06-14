@@ -513,8 +513,9 @@ export async function getRecommendations(
       return true;
     }),
     RECOMMENDATION_LIMIT,
-  ).sort((a, b) => b.relevanceScore - a.relevanceScore);
-
+  ).sort(
+    (a, b) => b.finalScore - a.finalScore || b.listenCount - a.listenCount,
+  );
   return Promise.all(
     top.map(
       async (c): Promise<Track> => ({
