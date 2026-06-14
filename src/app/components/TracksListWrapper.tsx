@@ -56,16 +56,16 @@ export default function TracksListWrapper({ selections }: { selections?: string 
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-white/8 bg-white/[0.03] px-4 py-3">
         {/* Mood selector */}
         <div className="flex items-center gap-2">
-          <label className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Mood
           </label>
           <select
             value={mood}
             onChange={(e) => setMood(e.target.value)}
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm text-zinc-800 shadow-sm dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-100"
+            className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-sm text-slate-200 outline-none transition focus:border-violet-500/50 focus:ring-1 focus:ring-violet-500/20"
           >
             <option value="">Any</option>
             {MOODS.map((m) => (
@@ -78,7 +78,7 @@ export default function TracksListWrapper({ selections }: { selections?: string 
 
         {/* Novelty slider */}
         <div className="flex items-center gap-2">
-          <label className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
             Novelty
           </label>
           <input
@@ -90,9 +90,9 @@ export default function TracksListWrapper({ selections }: { selections?: string 
             onChange={(e) => setNoveltyDisplay(Number(e.target.value))}
             onMouseUp={(e) => setNoveltyCommitted(Number((e.target as HTMLInputElement).value))}
             onTouchEnd={(e) => setNoveltyCommitted(Number((e.target as HTMLInputElement).value))}
-            className="w-28 accent-zinc-900 dark:accent-zinc-100"
+            className="w-28 accent-violet-500"
           />
-          <span className="w-14 text-xs text-zinc-500 dark:text-zinc-400">
+          <span className="w-14 text-xs text-slate-500">
             {noveltyLabel(noveltyDisplay)}
           </span>
         </div>

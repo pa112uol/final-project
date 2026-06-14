@@ -33,32 +33,41 @@ function formatDuration(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-function TrackCard({ track }: { track: Track }) {
+function TrackCard({ track, index }: { track: Track; index: number }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+    <div className="flex flex-col gap-4 rounded-2xl border border-white/8 bg-white/[0.03] p-6 transition-all hover:border-white/12 hover:bg-white/[0.05]">
       <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="font-semibold text-zinc-900 dark:text-zinc-100">
-            {track.title}
-          </h2>
-          <p className="text-sm text-zinc-500">{track.artist}</p>
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-violet-500/10 text-sm font-bold text-violet-400">
+            {index + 1}
+          </div>
+          <div>
+            <h2 className="font-semibold leading-snug text-slate-100">
+              {track.title}
+            </h2>
+            <p className="mt-0.5 text-sm text-slate-400">{track.artist}</p>
+          </div>
         </div>
-        <div className="shrink-0 text-right text-xs text-zinc-400">
+        <div className="shrink-0 text-right text-xs text-slate-500">
           {track.firstReleaseDate && (
-            <p>{track.firstReleaseDate.slice(0, 4)}</p>
+            <p className="font-medium">{track.firstReleaseDate.slice(0, 4)}</p>
           )}
-          {track.durationMs && <p>{formatDuration(track.durationMs)}</p>}
+          {track.durationMs && (
+            <p className="mt-0.5">{formatDuration(track.durationMs)}</p>
+          )}
         </div>
       </div>
 
       {track.streaming.youtubeVideoId && (
-        <iframe
-          className="w-full rounded-lg"
-          height={220}
-          src={`https://www.youtube.com/embed/${track.streaming.youtubeVideoId}`}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-        />
+        <div className="overflow-hidden rounded-xl">
+          <iframe
+            className="w-full"
+            height={220}
+            src={`https://www.youtube.com/embed/${track.streaming.youtubeVideoId}`}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
       )}
 
       {track.streaming.preview && (
@@ -71,7 +80,7 @@ function TrackCard({ track }: { track: Track }) {
             href={track.streaming.appleMusic}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            className="flex items-center gap-1.5 rounded-full border border-rose-500/20 bg-rose-500/10 px-3 py-1.5 text-rose-300 transition-colors hover:bg-rose-500/20"
           >
             Apple Music
           </a>
@@ -80,18 +89,20 @@ function TrackCard({ track }: { track: Track }) {
           href={track.streaming.spotify}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+          className="flex items-center gap-1.5 rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1.5 text-green-300 transition-colors hover:bg-green-500/20"
         >
           Spotify
         </a>
-        <a
-          href={`https://musicbrainz.org/recording/${track.mbid}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-full bg-zinc-100 px-3 py-1 text-zinc-700 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-        >
-          MusicBrainz
-        </a>
+        {track.mbid && (
+          <a
+            href={`https://musicbrainz.org/recording/${track.mbid}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 rounded-full border border-slate-500/20 bg-slate-500/10 px-3 py-1.5 text-slate-400 transition-colors hover:bg-slate-500/20"
+          >
+            MusicBrainz
+          </a>
+        )}
       </div>
     </div>
   );
@@ -138,49 +149,65 @@ export default function TracksList({
     fetchTracks();
   }
 
-  const title = mode === "recommendations" ? "Recommended for You" : "Random Tracks";
-  const buttonLabel = loading ? "Loading…" : mode === "recommendations" ? "Refresh" : "Shuffle";
+  const isRecommendations = mode === "recommendations";
+  const title = isRecommendations ? "Recommended for You" : "Discovered tracks";
+  const buttonLabel = isRecommendations ? "Refresh" : "Shuffle";
 
   return (
     <>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-          {title}
-        </h1>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-100">{title}</h1>
+          {!loading && tracks.length > 0 && (
+            <p className="mt-1 text-sm text-slate-500">
+              {tracks.length} tracks found
+            </p>
+          )}
+        </div>
         <button
           onClick={handleShuffle}
           disabled={loading}
-          className="rounded-full bg-zinc-900 px-4 py-2 text-sm text-white hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-slate-300 transition-all hover:bg-white/10 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {buttonLabel}
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          {loading ? "Loading…" : buttonLabel}
         </button>
       </div>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && (
+        <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          {error}
+        </div>
+      )}
 
       {loading && (
         <div className="flex flex-col gap-4">
           {Array.from({ length: 5 }).map((_, i) => (
             <div
               key={i}
-              className="h-64 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800"
+              className="h-64 animate-pulse rounded-2xl border border-white/5 bg-white/[0.03]"
             />
           ))}
         </div>
       )}
 
       {!loading && tracks.length === 0 && !error && (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">No tracks found. Try a different seed track or mood.</p>
+        <p className="text-sm text-slate-500">
+          No tracks found. Try a different seed track or mood.
+        </p>
       )}
 
       {!loading && tracks.length > 0 && (
         <div className="flex flex-col gap-4">
-          {tracks.map((track) => (
-            <TrackCard key={track.mbid} track={track} />
+          {tracks.map((track, i) => (
+            <TrackCard key={track.mbid || `${track.title}-${i}`} track={track} index={i} />
           ))}
         </div>
       )}
     </>
   );
 }
-

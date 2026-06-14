@@ -2,14 +2,23 @@ import CompositionSearch from "./components/CompositionSearch";
 
 export default function Home() {
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col gap-6 px-4 py-12">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold dark:text-white">Discover Music</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
-          Search for artists or tracks you enjoy, then let us find something new for you.
-        </p>
+    <main className="flex min-h-screen flex-col items-center justify-center px-4 py-16">
+      <div className="w-full max-w-md">
+        <div className="rounded-xl border border-[#333] bg-[#111] p-8 shadow-2xl">
+          <div className="flex flex-col gap-6">
+            <div>
+              <h1 className="text-xl font-semibold text-white">
+                Find your next track
+              </h1>
+              <p className="mt-1 text-sm text-[#888]">
+                Search an artist or song to discover something new.
+              </p>
+            </div>
+            <CompositionSearch />
+          </div>
+        </div>
       </div>
-      <CompositionSearch />
     </main>
   );
 }
+
