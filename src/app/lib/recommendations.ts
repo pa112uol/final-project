@@ -184,14 +184,32 @@ function titlesOverlap(a: string, b: string): boolean {
   );
 }
 
+// Strip edition/version suffixes (" - Remastered", " (Live)", " [Bonus Track]")
+// so variant recordings of the same song collapse to a single key. A space
+// before the delimiter avoids clipping hyphenated titles like "Drive-In".
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/ [-(\[].*$/, "")
+    .trim();
+}
+
+function median(values: number[]): number {
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
 function filterSeeds(
   candidateMap: Map<string, Candidate>,
   seeds: Seed[],
 ): void {
   const seedTitles = seeds.map((s) => s.title.toLowerCase());
+  const seedArtists = new Set(seeds.map((s) => s.artist.toLowerCase()));
   for (const [key, c] of candidateMap) {
     const ct = c.title.toLowerCase();
-    if (seedTitles.some((t) => titlesOverlap(t, ct))) {
+    const ca = c.artist.toLowerCase();
+    if (seedArtists.has(ca) || seedTitles.some((t) => titlesOverlap(t, ct))) {
       candidateMap.delete(key);
     }
   }
@@ -203,6 +221,31 @@ function deduplicateByMbid(candidateMap: Map<string, Candidate>): void {
     if (c.mbid) {
       if (seenMbids.has(c.mbid)) candidateMap.delete(key);
       else seenMbids.add(c.mbid);
+    }
+  }
+}
+
+// Collapse variant recordings (remaster/live/single editions) that share a
+// normalized title + artist but carry distinct MBIDs, which deduplicateByMbid
+// cannot catch. Keep the variant with an MBID (enables popularity lookup),
+// then the higher-relevance one.
+function deduplicateByTitle(candidateMap: Map<string, Candidate>): void {
+  const kept = new Map<string, string>(); // normalized key -> surviving map key
+  for (const [key, c] of candidateMap) {
+    const normKey = `${normalizeTitle(c.title)}|||${c.artist.toLowerCase()}`;
+    const prevKey = kept.get(normKey);
+    if (prevKey === undefined) {
+      kept.set(normKey, key);
+      continue;
+    }
+    const prev = candidateMap.get(prevKey)!;
+    const cWins =
+      !!c.mbid !== !!prev.mbid ? !!c.mbid : c.tagWeightSum > prev.tagWeightSum;
+    if (cWins) {
+      candidateMap.delete(prevKey);
+      kept.set(normKey, key);
+    } else {
+      candidateMap.delete(key);
     }
   }
 }
@@ -328,6 +371,14 @@ async function buildCandidates(
   return candidates;
 }
 
+// Obscurity from a listen count, normalized on a log scale against the max.
+// Log scale is essential: listen counts are power-law distributed, so linear
+// normalization lets one mega-popular track flatten everything else to ~1.
+function logObscurity(count: number, logMax: number): number {
+  if (logMax <= 0) return 0;
+  return 1 - Math.log1p(count) / logMax;
+}
+
 function scoreAndSort(
   candidates: Candidate[],
   novelty: number,
@@ -339,23 +390,47 @@ function scoreAndSort(
     ...candidates.map((c) => c.artistListenCount),
     1,
   );
+  const logMaxListen = Math.log1p(maxListenCount);
+  const logMaxArtist = Math.log1p(maxArtistListenCount);
+
+  // First pass: obscurity for candidates that have any popularity data. Recording
+  // count is the more specific signal; when both exist, weight it over the
+  // artist-level one rather than ignoring whichever branch comes second.
+  const obscurity = new Map<Candidate, number>();
+  const known: number[] = [];
+  for (const c of candidates) {
+    const hasRec = c.listenCount > 0;
+    const hasArt = c.artistListenCount > 0;
+    if (!hasRec && !hasArt) continue;
+    const recObsc = hasRec ? logObscurity(c.listenCount, logMaxListen) : null;
+    const artObsc = hasArt
+      ? logObscurity(c.artistListenCount, logMaxArtist)
+      : null;
+    const o =
+      recObsc !== null && artObsc !== null
+        ? 0.7 * recObsc + 0.3 * artObsc
+        : (recObsc ?? artObsc)!;
+    obscurity.set(c, o);
+    known.push(o);
+  }
+  // Tracks with no popularity data get the median observed obscurity, not a
+  // hardcoded 0.5. The median places them neutrally within the actual
+  // distribution and avoids a large tie-cluster that the novelty slider can't break
+  const neutral = known.length > 0 ? median(known) : 0.5;
 
   return candidates
     .map((c): ScoredCandidate => {
       const relevanceNorm =
         maxRelevance > 0 ? c.tagWeightSum / maxRelevance : 0;
-      // Three-tier popularity signal: recording count => artist count => neutral 0.5.
-      // 0.5 neutral avoids making a famous band look obscure just because Last.fm
-      // omitted its MBID and neither LB endpoint had data for it.
-      const popularityObscurity =
-        c.listenCount > 0
-          ? 1 - c.listenCount / maxListenCount
-          : c.artistListenCount > 0
-            ? 1 - c.artistListenCount / maxArtistListenCount
-            : 0.5;
+      const popularityObscurity = obscurity.get(c) ?? neutral;
       const finalScore =
         (1 - novelty) * relevanceNorm + novelty * popularityObscurity;
-      return { ...c, finalScore, relevanceScore: relevanceNorm, noveltyScore: popularityObscurity };
+      return {
+        ...c,
+        finalScore,
+        relevanceScore: relevanceNorm,
+        noveltyScore: popularityObscurity,
+      };
     })
     .sort((a, b) => b.finalScore - a.finalScore);
 }
@@ -405,6 +480,7 @@ export async function getRecommendations(
 
   filterSeeds(candidateMap, seeds);
   deduplicateByMbid(candidateMap);
+  deduplicateByTitle(candidateMap);
 
   const mbids = [...candidateMap.values()].map((c) => c.mbid).filter(Boolean);
   const lbPopularity = await fetchRecordingPopularity(mbids);
