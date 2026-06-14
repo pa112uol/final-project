@@ -11,11 +11,10 @@ export function mbFetch(url: string): Promise<Response> {
   const result = queue.then(
     () =>
       new Promise<Response>((resolve, reject) => {
-        fetch(url, { headers: { "User-Agent": USER_AGENT } })
-          .then(resolve, reject)
-          .finally(() => {
-            // Hold the queue for the cooldown period after each request
-          });
+        fetch(url, { headers: { "User-Agent": USER_AGENT } }).then(
+          resolve,
+          reject,
+        );
       }),
   );
 
