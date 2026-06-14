@@ -38,6 +38,7 @@ const NOISE_TAGS = new Set([
   "under 2000 listeners",
   "all",
   "music",
+  "epic",
 ]);
 
 // Genre roots, compound genre labels one level above sub-genre, and decade tags
