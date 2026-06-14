@@ -22,7 +22,7 @@ const TRACKS_PER_ARTIST = 5;
 const MOOD_BOOST_WEIGHT = 1_000;
 const MMR_LAMBDA = 0.7;
 
-// Last.fm user-collection tags — describe listening habits, not musical content.
+// Last.fm user-collection tags, describe listening habits, not musical content.
 const NOISE_TAGS = new Set([
   "seen live",
   "favorites",
@@ -42,7 +42,7 @@ const NOISE_TAGS = new Set([
 ]);
 
 // Genre roots, compound genre labels one level above sub-genre, and decade tags
-// are excluded from candidate fetching — they pull in stylistically unrelated
+// are excluded from candidate fetching they pull in stylistically unrelated
 // artists. Only sub-genre and scene tags (e.g. "britpop", "shoegaze") are used.
 const BROAD_FETCH_TAGS = new Set([
   "rock",
@@ -57,7 +57,6 @@ const BROAD_FETCH_TAGS = new Set([
   "punk",
   "dance",
   "hip hop",
-  "hip-hop",
   "r&b",
   "rap",
   "country",
@@ -81,6 +80,7 @@ const BROAD_FETCH_TAGS = new Set([
   "2000s",
   "2010s",
   "2020s",
+  "british",
 ]);
 
 export const MOOD_TAGS: Record<string, string[]> = {
@@ -250,20 +250,34 @@ function deduplicateByTitle(candidateMap: Map<string, Candidate>): void {
   }
 }
 
+function normalizeTag(tag: string): string {
+  return tag.replace(/-/g, " ");
+}
+
 function mergeTags(
   lbTags: { name: string; count: number }[],
   lfTags: LFTag[],
 ): LFTag[] {
-  const merged = new Map<string, number>();
+  const merged = new Map<string, { count: number; original: string }>();
   for (const { name, count } of lbTags) {
-    if (!NOISE_TAGS.has(name)) merged.set(name, count * LB_TAG_SCALE);
+    const norm = normalizeTag(name);
+    if (!NOISE_TAGS.has(norm)) {
+      const existing = merged.get(norm);
+      if (existing) existing.count += count * LB_TAG_SCALE;
+      else merged.set(norm, { count: count * LB_TAG_SCALE, original: name });
+    }
   }
   // Last.fm supplements with mood/vibe tags absent from LB; if tag is already
   // present from LB, keep the boosted LB weight.
   for (const { name, count } of lfTags) {
-    if (!NOISE_TAGS.has(name) && !merged.has(name)) merged.set(name, count);
+    const norm = normalizeTag(name);
+    if (!NOISE_TAGS.has(norm) && !merged.has(norm))
+      merged.set(norm, { count, original: name });
   }
-  return [...merged.entries()].map(([name, count]) => ({ name, count }));
+  return [...merged.values()].map(({ count, original }) => ({
+    name: original,
+    count,
+  }));
 }
 
 function buildTagWeights(
@@ -271,25 +285,28 @@ function buildTagWeights(
   mood?: string,
 ): Map<string, number> {
   const totalSeeds = Math.max(seedTagSets.length, 1);
-  const tagTF = new Map<string, number>();
-  const tagDF = new Map<string, number>();
+  const tagTF = new Map<string, number>(); // norm → total count
+  const tagDF = new Map<string, number>(); // norm → doc frequency
+  const tagOriginal = new Map<string, string>(); // norm → first-seen original form
 
   for (const tags of seedTagSets) {
     const seenInSeed = new Set<string>();
     for (const { name, count } of tags) {
-      tagTF.set(name, (tagTF.get(name) ?? 0) + count);
-      if (!seenInSeed.has(name)) {
-        tagDF.set(name, (tagDF.get(name) ?? 0) + 1);
-        seenInSeed.add(name);
+      const norm = normalizeTag(name);
+      tagTF.set(norm, (tagTF.get(norm) ?? 0) + count);
+      if (!tagOriginal.has(norm)) tagOriginal.set(norm, name);
+      if (!seenInSeed.has(norm)) {
+        tagDF.set(norm, (tagDF.get(norm) ?? 0) + 1);
+        seenInSeed.add(norm);
       }
     }
   }
 
   const weights = new Map<string, number>();
-  for (const [tag, tf] of tagTF) {
-    const df = tagDF.get(tag) ?? 1;
+  for (const [norm, tf] of tagTF) {
+    const df = tagDF.get(norm) ?? 1;
     const idf = Math.log((totalSeeds + 1) / (df + 1)) + 1;
-    weights.set(tag, tf * idf);
+    weights.set(tagOriginal.get(norm)!, tf * idf);
   }
 
   if (mood && MOOD_TAGS[mood]) {
@@ -330,7 +347,9 @@ async function buildCandidates(
   );
 
   const topArtists = [...artistScores.values()]
-    .sort((a, b) => b.tagWeightSum - a.tagWeightSum)
+    .sort(
+      (a, b) => b.tagWeightSum - a.tagWeightSum || a.name.localeCompare(b.name),
+    )
     .slice(0, TOP_ARTISTS_COUNT);
 
   console.log(
@@ -462,13 +481,22 @@ export async function getRecommendations(
 
   if (sortedTags.length === 0) return [];
 
+  // Exclude tags that match a seed artist name, e.g. "queen" for a Queen seed
+  // would make fetchTagArtists return mostly Queen members and collaborators.
+  const seedArtistNames = new Set(seeds.map((s) => s.artist.toLowerCase()));
+
   // Prefer specific tags for fetching; fall back to broad ones only when
   // fewer than 2 specific tags exist (e.g. a pure rock seed with no sub-genre).
   let fetchTags = sortedTags
-    .filter(([tag]) => !BROAD_FETCH_TAGS.has(tag))
+    .filter(
+      ([tag]) =>
+        !BROAD_FETCH_TAGS.has(normalizeTag(tag)) && !seedArtistNames.has(tag),
+    )
     .slice(0, TOP_TAGS_COUNT);
   if (fetchTags.length < 2) {
-    fetchTags = sortedTags.slice(0, TOP_TAGS_COUNT);
+    fetchTags = sortedTags
+      .filter(([tag]) => !seedArtistNames.has(tag))
+      .slice(0, TOP_TAGS_COUNT);
   }
 
   console.log(
@@ -476,7 +504,11 @@ export async function getRecommendations(
     fetchTags.map(([t, w]) => `${t}(${w.toFixed(0)})`).join(", "),
   );
 
-  const candidateMap = await buildCandidates(fetchTags, apiKey);
+  const candidateMap = new Map(
+    [...(await buildCandidates(fetchTags, apiKey)).entries()].sort(([a], [b]) =>
+      a.localeCompare(b),
+    ),
+  );
 
   filterSeeds(candidateMap, seeds);
   deduplicateByMbid(candidateMap);
@@ -484,6 +516,7 @@ export async function getRecommendations(
 
   const mbids = [...candidateMap.values()].map((c) => c.mbid).filter(Boolean);
   const lbPopularity = await fetchRecordingPopularity(mbids);
+
   for (const candidate of candidateMap.values()) {
     const count = lbPopularity.get(candidate.mbid);
     if (count !== undefined) candidate.listenCount = count;
