@@ -10,6 +10,7 @@ import {
   fetchRecordingTags,
 } from "@/app/lib/listenbrainz";
 import { getStreamingLinks, StreamingLinks } from "@/app/lib/streaming";
+
 const RECOMMENDATION_LIMIT = 10;
 // LB tag counts are ~1-10; LF tag counts go up to 100. Scale LB up so they
 // dominate TF in buildTagWeights while still letting LF mood/vibe tags supplement.
@@ -107,6 +108,8 @@ export interface Track {
   firstReleaseDate: string | null;
   releases: { mbid: string; title: string; date?: string }[];
   streaming: StreamingLinks;
+  relevanceScore: number;
+  noveltyScore: number;
 }
 
 interface Candidate {
@@ -123,6 +126,8 @@ interface Candidate {
 
 interface ScoredCandidate extends Candidate {
   finalScore: number;
+  relevanceScore: number;
+  noveltyScore: number;
 }
 
 function tokenize(tags: string[]): Set<string> {
@@ -173,18 +178,19 @@ function mmrSelect(ranked: ScoredCandidate[], k: number): ScoredCandidate[] {
 function titlesOverlap(a: string, b: string): boolean {
   if (a === b) return true;
   const [longer, shorter] = a.length >= b.length ? [a, b] : [b, a];
-  return longer.startsWith(shorter) && /^ [-(\[]/.test(longer.slice(shorter.length));
+  return (
+    longer.startsWith(shorter) && /^ [-(\[]/.test(longer.slice(shorter.length))
+  );
 }
 
-function filterSeeds(candidateMap: Map<string, Candidate>, seeds: Seed[]): void {
-  const normalizedSeeds = seeds.map((s) => ({
-    title: s.title.toLowerCase(),
-    artist: s.artist.toLowerCase(),
-  }));
+function filterSeeds(
+  candidateMap: Map<string, Candidate>,
+  seeds: Seed[],
+): void {
+  const seedTitles = seeds.map((s) => s.title.toLowerCase());
   for (const [key, c] of candidateMap) {
     const ct = c.title.toLowerCase();
-    const ca = c.artist.toLowerCase();
-    if (normalizedSeeds.some((s) => s.artist === ca && titlesOverlap(s.title, ct))) {
+    if (seedTitles.some((t) => titlesOverlap(t, ct))) {
       candidateMap.delete(key);
     }
   }
@@ -346,8 +352,9 @@ function scoreAndSort(
           : c.artistListenCount > 0
             ? 1 - c.artistListenCount / maxArtistListenCount
             : 0.5;
-      const finalScore = (1 - novelty) * relevanceNorm + novelty * popularityObscurity;
-      return { ...c, finalScore };
+      const finalScore =
+        (1 - novelty) * relevanceNorm + novelty * popularityObscurity;
+      return { ...c, finalScore, relevanceScore: relevanceNorm, noveltyScore: popularityObscurity };
     })
     .sort((a, b) => b.finalScore - a.finalScore);
 }
@@ -429,7 +436,7 @@ export async function getRecommendations(
       return true;
     }),
     RECOMMENDATION_LIMIT,
-  );
+  ).sort((a, b) => b.relevanceScore - a.relevanceScore);
 
   return Promise.all(
     top.map(
@@ -442,6 +449,8 @@ export async function getRecommendations(
         firstReleaseDate: null,
         releases: [],
         streaming: await getStreamingLinks(c.artist, c.title),
+        relevanceScore: c.relevanceScore,
+        noveltyScore: c.noveltyScore,
       }),
     ),
   );
