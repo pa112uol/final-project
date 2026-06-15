@@ -41,7 +41,13 @@ export async function GET(req: NextRequest) {
 
   log("input", { seeds, mood: mood ?? null, novelty });
 
-  const tracks = await getRecommendations(seeds, apiKey, mood, novelty);
+  let tracks;
+  try {
+    tracks = await getRecommendations(seeds, apiKey, mood, novelty);
+  } catch (err) {
+    console.error("[REC] pipeline error:", err);
+    return NextResponse.json({ error: "Failed to fetch recommendations" }, { status: 500 });
+  }
 
   log("result", { tracksReturned: tracks.length, totalMs: Date.now() - startMs });
 
