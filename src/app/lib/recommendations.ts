@@ -1,4 +1,4 @@
-import { fetchTrackTags, fetchTagArtists, LFTag } from "@/app/lib/lastfm";
+import { fetchTrackTags, fetchTrackTagsOnly, fetchTagArtists, LFTag } from "@/app/lib/lastfm";
 import {
   fetchArtistPopularity,
   fetchArtistTopRecordings,
@@ -586,6 +586,40 @@ export async function getRecommendations(
   filterSeeds(candidateMap, seeds);
   deduplicateByMbid(candidateMap);
   deduplicateByTitle(candidateMap);
+
+  // Fetch LF track tags for same-artist pairs that still have no track-level
+  // signal — only these need tie-breaking, and skipping solos avoids the cost
+  // when there's nothing to differentiate.
+  const zeroScoreByArtist = new Map<string, Candidate[]>();
+  for (const c of candidateMap.values()) {
+    if (c.trackTagScore === 0) {
+      const key = c.artist.toLowerCase();
+      if (!zeroScoreByArtist.has(key)) zeroScoreByArtist.set(key, []);
+      zeroScoreByArtist.get(key)!.push(c);
+    }
+  }
+  const tieBreakCandidates = [...zeroScoreByArtist.values()]
+    .filter((cs) => cs.length >= 2)
+    .flat();
+
+  await Promise.allSettled(
+    tieBreakCandidates.map(async (c) => {
+      const lfTags = await fetchTrackTagsOnly(c.title, c.artist, apiKey, c.mbid || undefined);
+      if (lfTags.length === 0) {
+        console.log(`[tiebreak] "${c.title}" – ${c.artist}: no LF tags`);
+        return;
+      }
+      c.tags = lfTags.map((t) => t.name);
+      c.trackTagScore = c.tags.reduce(
+        (sum, tag) => sum + (normalizedTagWeights.get(normalizeTag(tag.toLowerCase())) ?? 0),
+        0,
+      );
+      console.log(
+        `[tiebreak] "${c.title}" – ${c.artist}: tags=[${c.tags.slice(0, 6).join(", ")}] trackTagScore=${c.trackTagScore.toFixed(1)}`,
+      );
+    }),
+  );
+
   // For tracks with no listen count (listenCount === 0), fall back to artist-level popularity
   const artistMbids = [...candidateMap.values()]
     .filter((c) => c.listenCount === 0 && c.artistMbid)

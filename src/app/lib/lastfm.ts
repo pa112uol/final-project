@@ -76,6 +76,23 @@ export async function fetchTrackTags(
   return parseTags(artistData?.toptags?.tag);
 }
 
+export async function fetchTrackTagsOnly(
+  title: string,
+  artist: string,
+  apiKey: string,
+  mbid?: string,
+): Promise<LFTag[]> {
+  const params: Record<string, string> = {
+    method: "track.getTopTags",
+    track: title,
+    artist,
+    autocorrect: "1",
+  };
+  if (mbid) params.mbid = mbid;
+  const data = await lfFetch<{ toptags?: { tag?: unknown } }>(params, apiKey);
+  return parseTags(data?.toptags?.tag);
+}
+
 export interface LFArtist {
   name: string;
   mbid?: string;
