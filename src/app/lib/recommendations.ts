@@ -141,36 +141,37 @@ function tokenize(tags: string[]): Set<string> {
   return tokens;
 }
 
-function jaccardSimilarity(a: string[], b: string[]): number {
-  if (a.length === 0 || b.length === 0) return 0;
-  const tokensA = tokenize(a);
-  const tokensB = tokenize(b);
+function jaccardSets(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
   let intersection = 0;
-  for (const token of tokensA) {
-    if (tokensB.has(token)) intersection++;
+  for (const token of a) {
+    if (b.has(token)) intersection++;
   }
-  return intersection / (tokensA.size + tokensB.size - intersection);
+  return intersection / (a.size + b.size - intersection);
 }
 
 function mmrSelect(ranked: ScoredCandidate[], k: number): ScoredCandidate[] {
+  const remaining = ranked.map((c) => ({ c, tokens: tokenize(c.tags) }));
   const selected: ScoredCandidate[] = [];
-  const remaining = [...ranked];
+  const selectedTokens: Set<string>[] = [];
+
   while (selected.length < k && remaining.length > 0) {
     let bestIdx = 0;
     let bestScore = -Infinity;
     for (let i = 0; i < remaining.length; i++) {
-      const c = remaining[i];
+      const { c, tokens } = remaining[i];
       const maxSim =
-        selected.length === 0
+        selectedTokens.length === 0
           ? 0
-          : Math.max(...selected.map((s) => jaccardSimilarity(c.tags, s.tags)));
+          : Math.max(...selectedTokens.map((st) => jaccardSets(tokens, st)));
       const score = MMR_LAMBDA * c.finalScore - (1 - MMR_LAMBDA) * maxSim;
       if (score > bestScore) {
         bestScore = score;
         bestIdx = i;
       }
     }
-    selected.push(remaining[bestIdx]);
+    selected.push(remaining[bestIdx].c);
+    selectedTokens.push(remaining[bestIdx].tokens);
     remaining.splice(bestIdx, 1);
   }
   return selected;
