@@ -23,6 +23,7 @@ export default function CompositionSearch() {
         if (res.ok) {
           const data = await res.json();
           setResults(data.results ?? []);
+
           setOpen(true);
         }
       } catch {}
@@ -51,7 +52,11 @@ export default function CompositionSearch() {
     if (chips.length === 0) return;
     // Pass mbid + title + artist so the recommendations API can use them
     // without needing an extra MusicBrainz round-trip
-    const seeds = chips.map((c) => ({ id: c.mbid, t: c.label, a: c.sub ?? "" }));
+    const seeds = chips.map((c) => ({
+      id: c.mbid,
+      t: c.label,
+      a: c.sub ?? "",
+    }));
     router.push(`/tracks?q=${encodeURIComponent(JSON.stringify(seeds))}`);
   }
 
@@ -59,8 +64,16 @@ export default function CompositionSearch() {
     <div className="flex flex-col gap-4">
       <div className="relative">
         <div className="pointer-events-none absolute inset-y-0 left-4 flex items-center">
-          <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          <svg
+            className="h-4 w-4 text-slate-500"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
               d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
             />
           </svg>
@@ -95,9 +108,13 @@ export default function CompositionSearch() {
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-400 text-base">
                     ♪
                   </div>
-                  <span className="truncate font-medium text-slate-100">{r.label}</span>
+                  <span className="truncate font-medium text-slate-100">
+                    {r.label}
+                  </span>
                   {r.sub && (
-                    <span className="ml-auto shrink-0 text-xs text-slate-500">{r.sub}</span>
+                    <span className="ml-auto shrink-0 text-xs text-slate-500">
+                      {r.sub}
+                    </span>
                   )}
                 </button>
               </li>
@@ -123,8 +140,18 @@ export default function CompositionSearch() {
                 className="ml-0.5 rounded-full p-0.5 text-violet-400 transition-colors hover:bg-violet-500/20 hover:text-violet-200"
                 aria-label={`Remove ${chip.label}`}
               >
-                <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="h-3 w-3"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2.5}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </button>
             </span>
@@ -143,3 +170,4 @@ export default function CompositionSearch() {
     </div>
   );
 }
+
