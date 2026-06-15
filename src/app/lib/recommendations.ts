@@ -119,6 +119,7 @@ interface Candidate {
   mbid: string;
   durationMs: number | null;
   tagWeightSum: number;
+  trackTagScore: number;
   listenCount: number;
   userCount: number;
   artistListenCount: number;
@@ -387,6 +388,7 @@ async function buildCandidates(
           mbid: r.mbid,
           durationMs: r.durationMs,
           tagWeightSum: artist.tagWeightSum,
+          trackTagScore: 0,
           listenCount: r.listenCount,
           userCount: r.userCount,
           artistListenCount: 0,
@@ -412,9 +414,10 @@ function scoreAndSort(
   novelty: number,
 ): ScoredCandidate[] {
   if (candidates.length === 0) return [];
-  let maxRelevance = 0, maxListenCount = 1, maxUserCount = 1, maxArtistListenCount = 1;
+  let maxRelevance = 0, maxTrackTagScore = 0, maxListenCount = 1, maxUserCount = 1, maxArtistListenCount = 1;
   for (const c of candidates) {
     if (c.tagWeightSum > maxRelevance) maxRelevance = c.tagWeightSum;
+    if (c.trackTagScore > maxTrackTagScore) maxTrackTagScore = c.trackTagScore;
     if (c.listenCount > maxListenCount) maxListenCount = c.listenCount;
     if (c.userCount > maxUserCount) maxUserCount = c.userCount;
     if (c.artistListenCount > maxArtistListenCount) maxArtistListenCount = c.artistListenCount;
@@ -540,6 +543,17 @@ export async function getRecommendations(
       a.localeCompare(b),
     ),
   );
+
+  const normalizedTagWeights = new Map<string, number>();
+  for (const [tag, weight] of tagWeights) {
+    normalizedTagWeights.set(normalizeTag(tag.toLowerCase()), weight);
+  }
+  for (const c of candidateMap.values()) {
+    c.trackTagScore = c.tags.reduce(
+      (sum, tag) => sum + (normalizedTagWeights.get(normalizeTag(tag.toLowerCase())) ?? 0),
+      0,
+    );
+  }
 
   filterSeeds(candidateMap, seeds);
   deduplicateByMbid(candidateMap);
