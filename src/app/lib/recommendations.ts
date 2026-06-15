@@ -333,7 +333,7 @@ async function buildCandidates(
   >();
   const artistTags = new Map<string, Set<string>>();
 
-  await Promise.allSettled(
+  const tagFetchResults = await Promise.allSettled(
     topTags.flatMap(([tag, tagWeight]) =>
       Array.from({ length: pagesToFetch }, (_, pageIdx) =>
         fetchTagArtists(tag, pageIdx + 1, ARTISTS_PER_TAG, apiKey).then(
@@ -357,11 +357,16 @@ async function buildCandidates(
                 });
               }
             }
+            return { tag, pageIdx };
           },
         ),
       ),
     ),
   );
+  for (const result of tagFetchResults) {
+    if (result.status === "rejected")
+      console.warn("[candidates] fetchTagArtists failed:", result.reason);
+  }
 
   const topArtists = [...artistScores.values()]
     .sort(
