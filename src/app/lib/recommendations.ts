@@ -205,11 +205,9 @@ function filterSeeds(
   seeds: Seed[],
 ): void {
   const seedTitles = seeds.map((s) => s.title.toLowerCase());
-  const seedArtists = new Set(seeds.map((s) => s.artist.toLowerCase()));
   for (const [key, c] of candidateMap) {
     const ct = c.title.toLowerCase();
-    const ca = c.artist.toLowerCase();
-    if (seedArtists.has(ca) || seedTitles.some((t) => titlesOverlap(t, ct))) {
+    if (seedTitles.some((t) => titlesOverlap(t, ct))) {
       candidateMap.delete(key);
     }
   }
