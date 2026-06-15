@@ -698,8 +698,6 @@ export async function getRecommendations(
       return true;
     }),
     RECOMMENDATION_LIMIT,
-  ).sort(
-    (a, b) => b.finalScore - a.finalScore || b.listenCount - a.listenCount,
   );
 
   console.log(
