@@ -3,6 +3,7 @@ import {
   normalizeTag,
   mergeTags,
   buildTagWeights,
+  isNoiseTag,
   NOISE_TAGS,
   BROAD_FETCH_TAGS,
   MOOD_TAGS,
@@ -42,12 +43,51 @@ describe("BROAD_FETCH_TAGS", () => {
 describe("MOOD_TAGS", () => {
   it("covers all expected moods", () => {
     const expectedMoods = [
-      "happy", "sad", "energetic", "chill", "angry", "melancholic", "romantic", "focus",
+      "happy",
+      "sad",
+      "energetic",
+      "chill",
+      "angry",
+      "melancholic",
+      "romantic",
+      "focus",
     ];
     for (const mood of expectedMoods) {
       expect(MOOD_TAGS[mood]).toBeDefined();
       expect(MOOD_TAGS[mood].length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("isNoiseTag", () => {
+  it("identifies numeric tags", () => {
+    expect(isNoiseTag("-1001740215468")).toBe(true);
+    expect(isNoiseTag("1234567890")).toBe(true);
+  });
+
+  it("identifies 4-digit year tags", () => {
+    expect(isNoiseTag("2019")).toBe(true);
+    expect(isNoiseTag("1994")).toBe(true);
+    expect(isNoiseTag("2000")).toBe(true);
+  });
+
+  it("identifies full decade tags (19xx/20xx with s)", () => {
+    expect(isNoiseTag("1990s")).toBe(true);
+    expect(isNoiseTag("2010s")).toBe(true);
+    expect(isNoiseTag("2020s")).toBe(true);
+  });
+
+  it("identifies abbreviated decade tags", () => {
+    expect(isNoiseTag("70s")).toBe(true);
+    expect(isNoiseTag("80s")).toBe(true);
+    expect(isNoiseTag("90s")).toBe(true);
+  });
+
+  it("does not flag real genre tags", () => {
+    expect(isNoiseTag("shoegaze")).toBe(false);
+    expect(isNoiseTag("dreampop")).toBe(false);
+    expect(isNoiseTag("post-punk")).toBe(false);
+    expect(isNoiseTag("808s")).toBe(false);
   });
 });
 
@@ -94,7 +134,10 @@ describe("buildTagWeights", () => {
     // shoegaze appears in both seeds so it carries full consensus weight
     // britpop appears only once and is down-weighted as an idiosyncratic tag
     const seedTagSets = [
-      [{ name: "shoegaze", count: 10 }, { name: "britpop", count: 10 }],
+      [
+        { name: "shoegaze", count: 10 },
+        { name: "britpop", count: 10 },
+      ],
       [{ name: "shoegaze", count: 10 }],
     ];
     const weights = buildTagWeights(seedTagSets);
@@ -105,7 +148,10 @@ describe("buildTagWeights", () => {
     // Both tags have identical total TF of 3. With equal raw counts,
     // rock wins because it is shared across all seeds while shoegaze appears only once
     const seedTagSets = [
-      [{ name: "rock", count: 1 }, { name: "shoegaze", count: 3 }],
+      [
+        { name: "rock", count: 1 },
+        { name: "shoegaze", count: 3 },
+      ],
       [{ name: "rock", count: 1 }],
       [{ name: "rock", count: 1 }],
     ];
@@ -126,3 +172,4 @@ describe("buildTagWeights", () => {
     expect(weights.size).toBe(1);
   });
 });
+

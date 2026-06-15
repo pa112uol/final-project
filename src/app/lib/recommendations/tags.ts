@@ -76,6 +76,17 @@ export function normalizeTag(tag: string): string {
   return tag.replace(/-/g, " ");
 }
 
+// Numeric tags ("-1001740215468") and specific year tags ("2019",
+// "1990s") that slip past BROAD_FETCH_TAGS produce useless artist lists from
+// tag.getTopArtists
+export function isNoiseTag(tag: string): boolean {
+  return (
+    /^-?\d+$/.test(tag) || // numeric tags: -1001740215468
+    /^(19|20)\d{2}s?$/.test(tag) || // full years/decades: 2019, 1990s, 2010s
+    /^\d{2}s$/.test(tag) // abbreviated decades: 70s, 80s, 90s
+  );
+}
+
 export function mergeTags(
   lbTags: { name: string; count: number }[],
   lfTags: LFTag[],

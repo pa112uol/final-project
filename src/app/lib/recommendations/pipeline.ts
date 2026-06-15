@@ -1,6 +1,13 @@
 import type { Seed, Track, PipelineClients } from "./types";
 import { buildCandidates } from "./candidates";
-import { buildTagWeights, mergeTags, MOOD_TAGS, normalizeTag } from "./tags";
+import {
+  buildTagWeights,
+  mergeTags,
+  MOOD_TAGS,
+  normalizeTag,
+  isNoiseTag,
+  BROAD_FETCH_TAGS,
+} from "./tags";
 import { filterSeeds, deduplicateByMbid, deduplicateByTitle } from "./dedup";
 import { scoreAndSort } from "./scoring";
 import { mmrSelect } from "./diversify";
@@ -10,7 +17,6 @@ import {
   MOOD_MULTIPLIER,
   MAX_TRACKS_PER_ARTIST,
 } from "./constants";
-import { BROAD_FETCH_TAGS } from "./tags";
 
 export async function runPipeline(
   seeds: Seed[],
@@ -67,12 +73,14 @@ export async function runPipeline(
   let fetchTags = sortedTags
     .filter(
       ([tag]) =>
-        !BROAD_FETCH_TAGS.has(normalizeTag(tag)) && !seedArtistNames.has(tag),
+        !BROAD_FETCH_TAGS.has(normalizeTag(tag)) &&
+        !seedArtistNames.has(tag) &&
+        !isNoiseTag(tag),
     )
     .slice(0, TOP_TAGS_COUNT);
   if (fetchTags.length < 2) {
     fetchTags = sortedTags
-      .filter(([tag]) => !seedArtistNames.has(tag))
+      .filter(([tag]) => !seedArtistNames.has(tag) && !isNoiseTag(tag))
       .slice(0, TOP_TAGS_COUNT);
   }
 
@@ -218,7 +226,9 @@ export async function runPipeline(
     withTagMatch.length >= RECOMMENDATION_LIMIT ? withTagMatch : afterArtistCap;
   console.log(
     `[pipeline:tagfloor] ${afterArtistCap.length - withTagMatch.length} tracks with no seed tag match — ` +
-      (preMMR === withTagMatch ? "excluded" : "kept (pool too small to filter)"),
+      (preMMR === withTagMatch
+        ? "excluded"
+        : "kept (pool too small to filter)"),
   );
   console.log(
     `[pipeline:mmr] selecting ${RECOMMENDATION_LIMIT} from ${preMMR.length} scored candidates`,
