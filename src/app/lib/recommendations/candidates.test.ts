@@ -199,6 +199,32 @@ describe("buildCandidates", () => {
     expect(result.length).toBeLessThanOrEqual(15);
   });
 
+  it("applies rank decay so artists ranked first receive more credit than lower-ranked ones", async () => {
+    const fetchTagArtists = vi
+      .fn()
+      .mockResolvedValue([
+        { name: "Slowdive", mbid: "mbid-1" },
+        { name: "Ride", mbid: "mbid-2" },
+      ]);
+    const fetchArtistTopRecordings = vi.fn().mockImplementation((mbid) =>
+      Promise.resolve([
+        mbid === "mbid-1"
+          ? { ...RECORDING_A, mbid: "rec-1", artistMbid: "mbid-1" }
+          : { ...RECORDING_A, mbid: "rec-2", artistMbid: "mbid-2", title: "Track B" },
+      ]),
+    );
+    const result = await buildCandidates(
+      TOP_TAGS,
+      "key",
+      0,
+      makeClients({ fetchTagArtists, fetchArtistTopRecordings }),
+    );
+    const slowdive = result.find((c) => c.artist === "Slowdive")!;
+    const ride = result.find((c) => c.artist === "Ride")!;
+    // Slowdive is at rank 0 (decay = 1.0) and Ride at rank 1 (decay < 1.0)
+    expect(slowdive.tagWeightSum).toBeGreaterThan(ride.tagWeightSum);
+  });
+
   it("deduplicates recordings by title+artist key", async () => {
     const duplicate = { ...RECORDING_A, mbid: "rec-a-dup" };
     const clients = makeClients({

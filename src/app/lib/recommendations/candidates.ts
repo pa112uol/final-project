@@ -31,21 +31,25 @@ export async function buildCandidates(
         clients
           .fetchTagArtists(tag, pageIdx + 1, ARTISTS_PER_TAG, apiKey)
           .then((artists) => {
-            for (const artist of artists) {
+            for (let rank = 0; rank < artists.length; rank++) {
+              const artist = artists[rank];
               const key = artist.name.toLowerCase();
               if (!artistTags.has(key)) artistTags.set(key, new Set());
               // Guard against crediting the same tag twice if an artist appears
               // on multiple pages of the same tag result
               const tagAlreadyCredited = artistTags.get(key)!.has(tag);
               artistTags.get(key)!.add(tag);
+              // Artists ranked higher in tag.getTopArtists are stronger genre representatives.
+              // Applying an NDCG style log discount weights rank 1 at 1.0 and rank 30 at 0.20
+              const rankDecay = 1 / Math.log2(rank + 2);
               const existing = artistScores.get(key);
               if (existing) {
-                if (!tagAlreadyCredited) existing.tagWeightSum += tagWeight;
+                if (!tagAlreadyCredited) existing.tagWeightSum += tagWeight * rankDecay;
                 if (!existing.mbid && artist.mbid) existing.mbid = artist.mbid;
               } else {
                 artistScores.set(key, {
                   name: artist.name,
-                  tagWeightSum: tagWeight,
+                  tagWeightSum: tagWeight * rankDecay,
                   mbid: artist.mbid ?? "",
                 });
               }
