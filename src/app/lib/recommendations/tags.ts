@@ -121,10 +121,13 @@ export function buildTagWeights(seedTagSets: LFTag[][]): Map<string, number> {
     }
   }
 
+  // Standard IDF rewards rare tags by computing log(N/df), but for preference
+  // profiling a tag shared across all seeds is the strongest signal, not noise.
+  // Flipping the ratio to log(df/N) makes consensus boost weight rather than suppress it
   const weights = new Map<string, number>();
   for (const [norm, tf] of tagTF) {
     const df = tagDF.get(norm) ?? 1;
-    const idf = Math.log((totalSeeds + 1) / (df + 1)) + 1;
+    const idf = 1 + Math.log((df + 1) / (totalSeeds + 1));
     weights.set(tagOriginal.get(norm)!, tf * idf);
   }
 

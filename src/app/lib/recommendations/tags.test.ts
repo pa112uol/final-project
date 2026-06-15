@@ -90,23 +90,20 @@ describe("buildTagWeights", () => {
     expect(buildTagWeights([[]]).size).toBe(0);
   });
 
-  it("assigns higher weight to tags appearing in more seeds (lower IDF penalty)", () => {
-    // "shoegaze" appears in both seeds, "britpop" only in one
+  it("assigns higher weight to a tag shared across more seeds", () => {
+    // shoegaze appears in both seeds so it carries full consensus weight
+    // britpop appears only once and is down-weighted as an idiosyncratic tag
     const seedTagSets = [
       [{ name: "shoegaze", count: 10 }, { name: "britpop", count: 10 }],
       [{ name: "shoegaze", count: 10 }],
     ];
     const weights = buildTagWeights(seedTagSets);
-    // shoegaze has higher df -> lower idf -> but also double the tf -> net higher
-    // The key property: both tags should be present
-    expect(weights.has("shoegaze")).toBe(true);
-    expect(weights.has("britpop")).toBe(true);
+    expect(weights.get("shoegaze")!).toBeGreaterThan(weights.get("britpop")!);
   });
 
-  it("down-weights a tag that appears in every seed (maximum df)", () => {
-    // Equal total TF for both tags: rock appears with count=1 in all 3 seeds (TF=3),
-    // shoegaze appears with count=3 in one seed (TF=3). With identical TF, the
-    // lower-df tag (shoegaze) earns a higher IDF and therefore a higher weight.
+  it("boosts a tag that appears in every seed (maximum consensus)", () => {
+    // Both tags have identical total TF of 3. With equal raw counts,
+    // rock wins because it is shared across all seeds while shoegaze appears only once
     const seedTagSets = [
       [{ name: "rock", count: 1 }, { name: "shoegaze", count: 3 }],
       [{ name: "rock", count: 1 }],
@@ -115,7 +112,7 @@ describe("buildTagWeights", () => {
     const weights = buildTagWeights(seedTagSets);
     const rockWeight = weights.get("rock")!;
     const shoegazeWeight = weights.get("shoegaze")!;
-    expect(shoegazeWeight).toBeGreaterThan(rockWeight);
+    expect(rockWeight).toBeGreaterThan(shoegazeWeight);
   });
 
   it("normalizes hyphen variants of the same tag to the same entry", () => {
