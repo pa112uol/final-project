@@ -459,11 +459,39 @@ function scoreAndSort(
   // distribution and avoids a large tie-cluster that the novelty slider can't break
   const neutral = known.length > 0 ? median(known) : 0.5;
 
-  return candidates
-    .map((c): ScoredCandidate => {
-      const relevanceNorm =
-        maxRelevance > 0 ? c.tagWeightSum / maxRelevance : 0;
-      const popularityObscurity = obscurity.get(c) ?? neutral;
+  // Compute raw relevance and obscurity before normalizing so we can
+  // min-max scale both to [0,1]. Without this, relevance clusters near the
+  // top of its range while obscurity spans the full range, making ν=0.5
+  // perceptually biased toward relevance.
+  const rawScores = candidates.map((c) => {
+    const artistNorm = maxRelevance > 0 ? c.tagWeightSum / maxRelevance : 0;
+    const trackTagNorm =
+      maxTrackTagScore > 0 && c.trackTagScore > 0
+        ? c.trackTagScore / maxTrackTagScore
+        : artistNorm;
+    return {
+      c,
+      relevance: 0.6 * artistNorm + 0.4 * trackTagNorm,
+      obs: obscurity.get(c) ?? neutral,
+    };
+  });
+
+  let minRel = Infinity, maxRel = -Infinity;
+  let minObs = Infinity, maxObs = -Infinity;
+  for (const { relevance, obs } of rawScores) {
+    if (relevance < minRel) minRel = relevance;
+    if (relevance > maxRel) maxRel = relevance;
+    if (obs < minObs) minObs = obs;
+    if (obs > maxObs) maxObs = obs;
+  }
+  const rangeRel = maxRel - minRel || 1;
+  const rangeObs = maxObs - minObs || 1;
+  console.log(`[score] rel range [${minRel.toFixed(3)}, ${maxRel.toFixed(3)}]  obs range [${minObs.toFixed(3)}, ${maxObs.toFixed(3)}]`);
+
+  return rawScores
+    .map(({ c, relevance, obs }): ScoredCandidate => {
+      const relevanceNorm = (relevance - minRel) / rangeRel;
+      const popularityObscurity = (obs - minObs) / rangeObs;
       const finalScore =
         (1 - novelty) * relevanceNorm + novelty * popularityObscurity;
       return {
