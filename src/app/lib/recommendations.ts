@@ -191,13 +191,17 @@ function titlesOverlap(a: string, b: string): boolean {
   );
 }
 
-// Strip edition/version suffixes (" - Remastered", " (Live)", " [Bonus Track]")
-// so variant recordings of the same song collapse to a single key. A space
-// before the delimiter avoids clipping hyphenated titles like "Drive-In".
+// Strip edition/version suffixes (" - Remastered", " (Live)", " [Bonus Track]"),
+// featuring credits (" feat. X", " ft. X", " featuring X"), and part indicators
+// (", Part 2", ", Pt. II") so variant recordings collapse to a single dedup key.
+// Space before the delimiter avoids clipping hyphenated titles like "Drive-In".
+// Requiring a dot for bare "ft" avoids false positives like "12 sq ft room".
 function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
     .replace(/ [-(\[].*$/, "")
+    .replace(/ (feat\.?|ft\.|featuring)\s.*$/, "")
+    .replace(/,?\s+(part|pt\.?)\s+\w+$/, "")
     .trim();
 }
 
