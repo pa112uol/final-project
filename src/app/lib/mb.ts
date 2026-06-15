@@ -1,5 +1,6 @@
 // MusicBrainz requires a meaningful User-Agent: App/Version (contact)
 // See: https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
+const MB_BASE = "https://musicbrainz.org/ws/2";
 const USER_AGENT = "NextTrack/1.0 (https://github.com/nexttrack)";
 const MB_MIN_INTERVAL_MS = 1_500;
 
@@ -27,5 +28,21 @@ export function mbFetch(url: string): Promise<Response> {
     .then(() => {});
 
   return result;
+}
+
+export async function resolveArtistMbid(name: string): Promise<string> {
+  try {
+    const query = `artist:"${name.replace(/"/g, "")}"`;
+    const res = await mbFetch(
+      `${MB_BASE}/artist?query=${encodeURIComponent(query)}&limit=1&fmt=json`,
+    );
+    if (!res.ok) return "";
+    const data = (await res.json()) as { artists?: { id: string; score: number }[] };
+    const top = data.artists?.[0];
+    if (!top || top.score < 85) return "";
+    return top.id;
+  } catch {
+    return "";
+  }
 }
 
