@@ -132,7 +132,7 @@ export default function CompositionSearch() {
             >
               {chip.label}
               {chip.sub && (
-                <span className="text-xs text-violet-400/60">— {chip.sub}</span>
+                <span className="text-xs text-violet-400/60">- {chip.sub}</span>
               )}
               <button
                 type="button"

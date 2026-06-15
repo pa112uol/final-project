@@ -14,8 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NextTrack — Find Your Next Favorite Track",
-  description: "Search for artists and tracks you love, then discover something new.",
+  title: "NextTrack - Find Your Next Favorite Track",
+  description:
+    "Search for artists and tracks you love, then discover something new.",
 };
 
 export default function RootLayout({
@@ -29,9 +30,10 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-          <Navbar />
-          {children}
-        </body>
+        <Navbar />
+        {children}
+      </body>
     </html>
   );
 }
+
