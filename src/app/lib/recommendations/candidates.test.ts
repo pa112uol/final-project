@@ -235,4 +235,34 @@ describe("buildCandidates", () => {
     // Same title+artist key: only one candidate is kept
     expect(trackATitles).toHaveLength(1);
   });
+
+  it("never exceeds 5 concurrent fetchArtistTopRecordings calls", async () => {
+    // Build 15 artists (novelty=0 default) so the semaphore is exercised
+    const artists = Array.from({ length: 15 }, (_, i) => ({
+      name: `Artist${i}`,
+      mbid: `mbid-${i}`,
+    }));
+    let peak = 0;
+    let inFlight = 0;
+    const fetchArtistTopRecordings = vi.fn().mockImplementation(() => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      return new Promise<typeof RECORDING_A[]>((resolve) =>
+        setTimeout(() => {
+          inFlight--;
+          resolve([{ ...RECORDING_A, artistMbid: "mbid-x" }]);
+        }, 10),
+      );
+    });
+    await buildCandidates(
+      TOP_TAGS,
+      "key",
+      0,
+      makeClients({
+        fetchTagArtists: vi.fn().mockResolvedValue(artists),
+        fetchArtistTopRecordings,
+      }),
+    );
+    expect(peak).toBeLessThanOrEqual(5);
+  });
 });
