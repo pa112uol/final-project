@@ -320,7 +320,7 @@ async function buildCandidates(
   >();
   const artistTags = new Map<string, Set<string>>();
 
-  await Promise.all(
+  await Promise.allSettled(
     topTags.map(async ([tag, tagWeight]) => {
       const artists = await fetchTagArtists(tag, 1, ARTISTS_PER_TAG, apiKey);
       for (const artist of artists) {
