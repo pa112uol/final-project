@@ -1,14 +1,10 @@
-import {
-  fetchArtistTopTracks,
-  fetchTrackTags,
-  fetchTagArtists,
-  LFTag,
-} from "@/app/lib/lastfm";
+import { fetchTrackTags, fetchTagArtists, LFTag } from "@/app/lib/lastfm";
 import {
   fetchArtistPopularity,
-  fetchRecordingPopularity,
+  fetchArtistTopRecordings,
   fetchRecordingTags,
 } from "@/app/lib/listenbrainz";
+import { resolveArtistMbid } from "@/app/lib/mb";
 import { getStreamingLinks, StreamingLinks } from "@/app/lib/streaming";
 
 const RECOMMENDATION_LIMIT = 10;
@@ -39,6 +35,7 @@ const NOISE_TAGS = new Set([
   "all",
   "music",
   "epic",
+  "glorious",
 ]);
 
 // Genre roots, compound genre labels one level above sub-genre, and decade tags
@@ -123,6 +120,7 @@ interface Candidate {
   durationMs: number | null;
   tagWeightSum: number;
   listenCount: number;
+  userCount: number;
   artistListenCount: number;
   tags: string[];
 }
@@ -287,9 +285,9 @@ function buildTagWeights(
   mood?: string,
 ): Map<string, number> {
   const totalSeeds = Math.max(seedTagSets.length, 1);
-  const tagTF = new Map<string, number>(); // norm → total count
-  const tagDF = new Map<string, number>(); // norm → doc frequency
-  const tagOriginal = new Map<string, string>(); // norm → first-seen original form
+  const tagTF = new Map<string, number>(); // norm => total count
+  const tagDF = new Map<string, number>(); // norm => doc frequency
+  const tagOriginal = new Map<string, string>(); // norm => first-seen original form
 
   for (const tags of seedTagSets) {
     const seenInSeed = new Set<string>();
@@ -327,7 +325,7 @@ async function buildCandidates(
   // Phase A: score artists by how many weighted tags they appear in
   const artistScores = new Map<
     string,
-    { name: string; tagWeightSum: number }
+    { name: string; tagWeightSum: number; mbid: string }
   >();
   const artistTags = new Map<string, Set<string>>();
 
@@ -339,8 +337,13 @@ async function buildCandidates(
         const existing = artistScores.get(key);
         if (existing) {
           existing.tagWeightSum += tagWeight;
+          if (!existing.mbid && artist.mbid) existing.mbid = artist.mbid;
         } else {
-          artistScores.set(key, { name: artist.name, tagWeightSum: tagWeight });
+          artistScores.set(key, {
+            name: artist.name,
+            tagWeightSum: tagWeight,
+            mbid: artist.mbid ?? "",
+          });
         }
         if (!artistTags.has(key)) artistTags.set(key, new Set());
         artistTags.get(key)!.add(tag);
@@ -359,31 +362,44 @@ async function buildCandidates(
     topArtists.map((a) => `${a.name}(${a.tagWeightSum.toFixed(0)})`).join(", "),
   );
 
-  // Phase B: fetch top tracks for each qualifying artist
+  // Resolve missing artist MBIDs via MusicBrainz (serialised by mbFetch queue)
+  await Promise.all(
+    topArtists
+      .filter((a) => !a.mbid)
+      .map(async (a) => {
+        a.mbid = await resolveArtistMbid(a.name);
+        console.log(
+          `[candidates] resolved mbid for ${a.name}: ${a.mbid || "not found"}`,
+        );
+      }),
+  );
+
+  // Phase B: fetch top recordings from ListenBrainz: verified MBIDs + listen counts
   const candidates = new Map<string, Candidate>();
 
   await Promise.all(
     topArtists.map(async (artist) => {
-      const tracks = await fetchArtistTopTracks(
-        artist.name,
+      if (!artist.mbid) return;
+      const recordings = await fetchArtistTopRecordings(
+        artist.mbid,
         TRACKS_PER_ARTIST,
-        apiKey,
       );
       const matchedTags = [
         ...(artistTags.get(artist.name.toLowerCase()) ?? []),
       ];
-      for (const t of tracks) {
-        const key = `${t.name.toLowerCase()}|||${artist.name.toLowerCase()}`;
+      for (const r of recordings) {
+        const key = `${r.title.toLowerCase()}|||${artist.name.toLowerCase()}`;
         candidates.set(key, {
-          title: t.name,
+          title: r.title,
           artist: artist.name,
-          artistMbid: t.artist?.mbid ?? "",
-          mbid: t.mbid ?? "",
-          durationMs: t.duration ? Number(t.duration) * 1000 : null,
+          artistMbid: r.artistMbid,
+          mbid: r.mbid,
+          durationMs: r.durationMs,
           tagWeightSum: artist.tagWeightSum,
-          listenCount: 0,
+          listenCount: r.listenCount,
+          userCount: r.userCount,
           artistListenCount: 0,
-          tags: matchedTags,
+          tags: r.tags.length > 0 ? r.tags : matchedTags,
         });
       }
     }),
@@ -394,7 +410,7 @@ async function buildCandidates(
 
 // Obscurity from a listen count, normalized on a log scale against the max.
 // Log scale is essential: listen counts are power-law distributed, so linear
-// normalization lets one mega-popular track flatten everything else to ~1.
+// normalization lets one mega popular track flatten everything else to ~1
 function logObscurity(count: number, logMax: number): number {
   if (logMax <= 0) return 0;
   return 1 - Math.log1p(count) / logMax;
@@ -407,23 +423,33 @@ function scoreAndSort(
   if (candidates.length === 0) return [];
   const maxRelevance = Math.max(...candidates.map((c) => c.tagWeightSum));
   const maxListenCount = Math.max(...candidates.map((c) => c.listenCount), 1);
+  const maxUserCount = Math.max(...candidates.map((c) => c.userCount), 1);
   const maxArtistListenCount = Math.max(
     ...candidates.map((c) => c.artistListenCount),
     1,
   );
   const logMaxListen = Math.log1p(maxListenCount);
+  const logMaxUser = Math.log1p(maxUserCount);
   const logMaxArtist = Math.log1p(maxArtistListenCount);
 
   // First pass: obscurity for candidates that have any popularity data. Recording
   // count is the more specific signal; when both exist, weight it over the
   // artist-level one rather than ignoring whichever branch comes second.
+  // Within the recording signal, blend listen count (scale) with user count
+  // (breadth) so repeat-play niche hits don't outscore genuinely popular tracks.
   const obscurity = new Map<Candidate, number>();
   const known: number[] = [];
   for (const c of candidates) {
     const hasRec = c.listenCount > 0;
     const hasArt = c.artistListenCount > 0;
     if (!hasRec && !hasArt) continue;
-    const recObsc = hasRec ? logObscurity(c.listenCount, logMaxListen) : null;
+    let recObsc: number | null = null;
+    if (hasRec) {
+      const listenObsc = logObscurity(c.listenCount, logMaxListen);
+      const userObsc =
+        c.userCount > 0 ? logObscurity(c.userCount, logMaxUser) : listenObsc;
+      recObsc = 0.6 * listenObsc + 0.4 * userObsc;
+    }
     const artObsc = hasArt
       ? logObscurity(c.artistListenCount, logMaxArtist)
       : null;
@@ -468,15 +494,27 @@ export async function getRecommendations(
         s.mbid ? fetchRecordingTags(s.mbid) : Promise.resolve([]),
         fetchTrackTags(s.title, s.artist, apiKey, s.mbid || undefined),
       ]);
+      console.log(
+        "lfTags for",
+        s.title,
+        ":",
+        lfTags.map((t) => `${t.name}(${t.count})`).join(", ") || "(none)",
+      );
+      console.log(
+        "lbTags for",
+        s.title,
+        ":",
+        lbTags.map((t) => `${t.name}(${t.count})`).join(", ") || "(none)",
+      );
       return mergeTags(lbTags, lfTags);
     }),
   );
 
-  const lfTagsSummary = seedTagSets.map(
+  const mergedSummary = seedTagSets.map(
     (tags: LFTag[], i: number) =>
       `  seed[${i}] (${seeds[i].title} – ${seeds[i].artist}): ${tags.map((t: LFTag) => `${t.name}(${t.count})`).join(", ") || "(none)"}`,
   );
-  console.log("[tags] merged lb+lastfm tags\n" + lfTagsSummary.join("\n"));
+  console.log("[tags/merged]\n" + mergedSummary.join("\n"));
 
   const tagWeights = buildTagWeights(seedTagSets, mood);
   const sortedTags = [...tagWeights.entries()].sort((a, b) => b[1] - a[1]);
@@ -484,11 +522,11 @@ export async function getRecommendations(
   if (sortedTags.length === 0) return [];
 
   // Exclude tags that match a seed artist name, e.g. "queen" for a Queen seed
-  // would make fetchTagArtists return mostly Queen members and collaborators.
+  // would make fetchTagArtists return mostly Queen members and collaborators
   const seedArtistNames = new Set(seeds.map((s) => s.artist.toLowerCase()));
 
   // Prefer specific tags for fetching; fall back to broad ones only when
-  // fewer than 2 specific tags exist (e.g. a pure rock seed with no sub-genre).
+  // fewer than 2 specific tags exist (e.g. a pure rock seed with no sub-genre)
   let fetchTags = sortedTags
     .filter(
       ([tag]) =>
@@ -515,16 +553,7 @@ export async function getRecommendations(
   filterSeeds(candidateMap, seeds);
   deduplicateByMbid(candidateMap);
   deduplicateByTitle(candidateMap);
-
-  const mbids = [...candidateMap.values()].map((c) => c.mbid).filter(Boolean);
-  const lbPopularity = await fetchRecordingPopularity(mbids);
-
-  for (const candidate of candidateMap.values()) {
-    const count = lbPopularity.get(candidate.mbid);
-    if (count !== undefined) candidate.listenCount = count;
-  }
-
-  // For tracks that got no recording-level data, fall back to artist-level popularity.
+  // For tracks with no listen count (listenCount === 0), fall back to artist-level popularity
   const artistMbids = [...candidateMap.values()]
     .filter((c) => c.listenCount === 0 && c.artistMbid)
     .map((c) => c.artistMbid);
@@ -540,7 +569,10 @@ export async function getRecommendations(
 
   const artistTrackCount = new Map<string, number>();
   const top = mmrSelect(
-    scoreAndSort([...candidateMap.values()], novelty).filter((c) => {
+    scoreAndSort(
+      [...candidateMap.values()].filter((c) => c.mbid),
+      novelty,
+    ).filter((c) => {
       const key = c.artist.toLowerCase();
       const count = artistTrackCount.get(key) ?? 0;
       if (count >= 2) return false;
@@ -551,6 +583,21 @@ export async function getRecommendations(
   ).sort(
     (a, b) => b.finalScore - a.finalScore || b.listenCount - a.listenCount,
   );
+
+  console.log(
+    "[candidates:final]\n" +
+      top
+        .map(
+          (c, i) =>
+            `  [${i + 1}] "${c.title}" – ${c.artist}` +
+            `\n       mbid:${c.mbid || "none"}` +
+            `\n       listens:${c.listenCount} users:${c.userCount} artistListens:${c.artistListenCount}` +
+            `\n       relevance:${c.relevanceScore.toFixed(3)} novelty:${c.noveltyScore.toFixed(3)} final:${c.finalScore.toFixed(3)}` +
+            `\n       tags:[${c.tags.slice(0, 6).join(", ")}]`,
+        )
+        .join("\n"),
+  );
+
   return Promise.all(
     top.map(
       async (c): Promise<Track> => ({
