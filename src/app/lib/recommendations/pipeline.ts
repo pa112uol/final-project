@@ -19,6 +19,11 @@ export async function runPipeline(
   novelty: number,
   clients: PipelineClients,
 ): Promise<Track[]> {
+  console.log(
+    `[pipeline:entry] seeds:${seeds.length} mood:${mood ?? "none"} novelty:${novelty}`,
+    seeds.map((s) => `"${s.title}" by ${s.artist}`).join(", "),
+  );
+
   const seedTagSets = await Promise.all(
     seeds.map(async (s) => {
       const [lbTags, lfTags] = await Promise.all([
@@ -82,6 +87,8 @@ export async function runPipeline(
     clients,
   );
 
+  console.log(`[pipeline:candidates] raw:${rawCandidates.length}`);
+
   // Sort for determinism before dedup (deduplicateByTitle keeps first winner)
   rawCandidates.sort((a, b) =>
     `${a.title}|||${a.artist}`.localeCompare(`${b.title}|||${b.artist}`),
@@ -100,16 +107,27 @@ export async function runPipeline(
     );
   }
 
-  let candidates = filterSeeds(rawCandidates, seeds);
-  candidates = deduplicateByMbid(candidates);
-  candidates = deduplicateByTitle(candidates);
+  const afterFilterSeeds = filterSeeds(rawCandidates, seeds);
+  console.log(
+    `[pipeline:dedup] after filterSeeds:${afterFilterSeeds.length} (removed:${rawCandidates.length - afterFilterSeeds.length})`,
+  );
+  const afterDedupeByMbid = deduplicateByMbid(afterFilterSeeds);
+  console.log(
+    `[pipeline:dedup] after deduplicateByMbid:${afterDedupeByMbid.length} (removed:${afterFilterSeeds.length - afterDedupeByMbid.length})`,
+  );
+  const candidates = deduplicateByTitle(afterDedupeByMbid);
+  console.log(
+    `[pipeline:dedup] after deduplicateByTitle:${candidates.length} (removed:${afterDedupeByMbid.length - candidates.length})`,
+  );
 
   // Enrich all candidates with LF track tags. This serves two purposes:
-  // (1) enables mood boosting — LB recording tags are genre-only (e.g. "shoegaze")
-  //     and never contain mood words; without this step the mood multiplier never
-  //     fires; (2) provides track-level signal for same-artist tie-breaking that the
-  //     shared artist tagWeightSum cannot resolve.
+  // 1) enables mood boosting - LB recording tags are genre-only (e.g. "shoegaze")
+  // and never contain mood words; without this step the mood multiplier never
+  // fires.
+  // 2) Provides track-level signal for same-artist tie-breaking that the
+  // shared artist tagWeightSum cannot resolve.
   // Tags are merged rather than replaced so LB genre labels are preserved for MMR.
+  let enrichedCount = 0;
   await Promise.allSettled(
     candidates.map(async (c) => {
       const lfTags = await clients.fetchTrackTagsOnly(
@@ -125,6 +143,7 @@ export async function runPipeline(
         .filter((t) => !existingLower.has(t.toLowerCase()));
       if (newTags.length === 0) return;
       c.tags = [...c.tags, ...newTags];
+      enrichedCount++;
       c.trackTagScore = c.tags.reduce(
         (sum, tag) =>
           sum +
@@ -132,6 +151,9 @@ export async function runPipeline(
         0,
       );
     }),
+  );
+  console.log(
+    `[pipeline:enrich] LF enrichment added tags to ${enrichedCount}/${candidates.length} candidates`,
   );
 
   // For tracks with no listen count, fall back to artist-level popularity
@@ -150,27 +172,46 @@ export async function runPipeline(
 
   if (mood && MOOD_TAGS[mood]) {
     const moodTagSet = new Set(MOOD_TAGS[mood]);
+    let moodBoosted = 0;
     for (const c of candidates) {
       if (c.tags.some((t) => moodTagSet.has(t.toLowerCase()))) {
         c.tagWeightSum *= MOOD_MULTIPLIER;
+        moodBoosted++;
       }
     }
+    console.log(
+      `[pipeline:mood] mood="${mood}" boosted:${moodBoosted}/${candidates.length} candidates (×${MOOD_MULTIPLIER})`,
+    );
   }
 
-  const artistTrackCount = new Map<string, number>();
-  const top = mmrSelect(
-    scoreAndSort(
-      candidates.filter((c) => c.mbid),
-      novelty,
-    ).filter((c) => {
-      const key = c.artist.toLowerCase();
-      const count = artistTrackCount.get(key) ?? 0;
-      if (count >= MAX_TRACKS_PER_ARTIST) return false;
-      artistTrackCount.set(key, count + 1);
-      return true;
-    }),
-    RECOMMENDATION_LIMIT,
+  const withMbid = candidates.filter((c) => c.mbid);
+  console.log(
+    `[pipeline:score] scoring ${withMbid.length} candidates with mbid (dropped ${candidates.length - withMbid.length} without mbid)`,
   );
+
+  const artistTrackCount = new Map<string, number>();
+  const artistCapDropped: string[] = [];
+  const scored = scoreAndSort(withMbid, novelty);
+  const afterArtistCap = scored.filter((c) => {
+    const key = c.artist.toLowerCase();
+    const count = artistTrackCount.get(key) ?? 0;
+    if (count >= MAX_TRACKS_PER_ARTIST) {
+      artistCapDropped.push(`"${c.title}" by ${c.artist}`);
+      return false;
+    }
+    artistTrackCount.set(key, count + 1);
+    return true;
+  });
+  if (artistCapDropped.length > 0) {
+    console.log(
+      `[pipeline:artistcap] dropped ${artistCapDropped.length} tracks (max ${MAX_TRACKS_PER_ARTIST}/artist):`,
+      artistCapDropped.join(", "),
+    );
+  }
+  console.log(
+    `[pipeline:mmr] selecting ${RECOMMENDATION_LIMIT} from ${afterArtistCap.length} scored candidates`,
+  );
+  const top = mmrSelect(afterArtistCap, RECOMMENDATION_LIMIT);
 
   console.log(
     "[candidates:final]\n" +

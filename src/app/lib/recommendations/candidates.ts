@@ -1,6 +1,23 @@
 import type { Candidate, PipelineClients } from "./types";
 import { ARTISTS_PER_TAG, TOP_ARTISTS_COUNT, TRACKS_PER_ARTIST } from "./constants";
 
+const LB_CONCURRENCY = 5;
+
+class Semaphore {
+  private running = 0;
+  private queue: Array<() => void> = [];
+  constructor(private max: number) {}
+  acquire(): Promise<void> {
+    if (this.running < this.max) { this.running++; return Promise.resolve(); }
+    return new Promise<void>((resolve) => this.queue.push(resolve));
+  }
+  release(): void {
+    this.running--;
+    const next = this.queue.shift();
+    if (next) { this.running++; next(); }
+  }
+}
+
 type CandidateClients = Pick<
   PipelineClients,
   "fetchTagArtists" | "fetchArtistTopRecordings" | "resolveArtistMbid"
@@ -64,12 +81,14 @@ export async function buildCandidates(
       console.warn("[candidates] fetchTagArtists failed:", result.reason);
   }
 
-  const topArtists = [...artistScores.values()]
-    .sort(
-      (a, b) =>
-        b.tagWeightSum - a.tagWeightSum || a.name.localeCompare(b.name),
-    )
-    .slice(0, topArtistsCount);
+  const allScoredArtists = [...artistScores.values()].sort(
+    (a, b) => b.tagWeightSum - a.tagWeightSum || a.name.localeCompare(b.name),
+  );
+  console.log(
+    `[candidates] scored artists total:${allScoredArtists.length}, selecting top:${topArtistsCount} (novelty pages:${pagesToFetch})`,
+  );
+
+  const topArtists = allScoredArtists.slice(0, topArtistsCount);
 
   console.log(
     "[candidates] top artists:",
@@ -92,17 +111,22 @@ export async function buildCandidates(
 
   // Phase B: fetch top recordings from ListenBrainz: verified MBIDs + listen counts
   const candidates = new Map<string, Candidate>();
+  const lbSem = new Semaphore(LB_CONCURRENCY);
 
   await Promise.allSettled(
     topArtists.map(async (artist) => {
       if (!artist.mbid) return;
-      const recordings = await clients.fetchArtistTopRecordings(
-        artist.mbid,
-        TRACKS_PER_ARTIST,
-      );
-      const matchedTags = [
-        ...(artistTags.get(artist.name.toLowerCase()) ?? []),
-      ];
+      await lbSem.acquire();
+      let recordings: Awaited<ReturnType<typeof clients.fetchArtistTopRecordings>>;
+      try {
+        recordings = await clients.fetchArtistTopRecordings(
+          artist.mbid,
+          TRACKS_PER_ARTIST,
+        );
+      } finally {
+        lbSem.release();
+      }
+      const matchedTags = [...(artistTags.get(artist.name.toLowerCase()) ?? [])];
       for (const r of recordings) {
         const key = `${r.title.toLowerCase()}|||${artist.name.toLowerCase()}`;
         candidates.set(key, {
@@ -122,5 +146,7 @@ export async function buildCandidates(
     }),
   );
 
-  return [...candidates.values()];
+  const result = [...candidates.values()];
+  console.log(`[candidates] total recordings fetched:${result.length}`);
+  return result;
 }

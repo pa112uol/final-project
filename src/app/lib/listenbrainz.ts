@@ -68,36 +68,47 @@ export async function fetchArtistTopRecordings(
   artistMbid: string,
   limit: number,
 ): Promise<LBRecording[]> {
-  try {
-    const res = await fetch(
-      `${LB_BASE}/popularity/top-recordings-for-artist/${encodeURIComponent(artistMbid)}`,
-      { headers: { "User-Agent": USER_AGENT } },
-    );
-    if (!res.ok) {
-      console.warn(
-        `[lb] fetchArtistTopRecordings HTTP ${res.status} for ${artistMbid}`,
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(
+        `${LB_BASE}/popularity/top-recordings-for-artist/${encodeURIComponent(artistMbid)}`,
+        { headers: { "User-Agent": USER_AGENT } },
       );
+      if (res.status === 429) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
+        console.warn(
+          `[lb] fetchArtistTopRecordings HTTP 429 for ${artistMbid}`,
+        );
+        return [];
+      }
+      if (!res.ok) {
+        console.warn(
+          `[lb] fetchArtistTopRecordings HTTP ${res.status} for ${artistMbid}`,
+        );
+        return [];
+      }
+      const data = (await res.json()) as LBTopRecording[];
+      return data
+        .filter((r) => r.recording_mbid && r.recording_name && r.artist_mbids?.[0])
+        .slice(0, limit)
+        .map((r) => ({
+          mbid: r.recording_mbid,
+          title: r.recording_name,
+          artistMbid: r.artist_mbids?.[0] ?? artistMbid,
+          durationMs: r.length ?? null,
+          listenCount: r.total_listen_count,
+          userCount: r.total_user_count,
+          tags: (r.tags ?? []).map((t) => t.tag.toLowerCase()),
+        }));
+    } catch (e) {
+      console.error("[lb] fetchArtistTopRecordings failed:", e);
       return [];
     }
-    const data = (await res.json()) as LBTopRecording[];
-    return data
-      .filter((r) => {
-        return r.recording_mbid && r.recording_name && r.artist_mbids?.[0];
-      })
-      .slice(0, limit)
-      .map((r) => ({
-        mbid: r.recording_mbid,
-        title: r.recording_name,
-        artistMbid: r.artist_mbids?.[0] ?? artistMbid,
-        durationMs: r.length ?? null,
-        listenCount: r.total_listen_count,
-        userCount: r.total_user_count,
-        tags: (r.tags ?? []).map((t) => t.tag.toLowerCase()),
-      }));
-  } catch (e) {
-    console.error("[lb] fetchArtistTopRecordings failed:", e);
-    return [];
   }
+  return [];
 }
 
 interface LBRecordingPopularity {

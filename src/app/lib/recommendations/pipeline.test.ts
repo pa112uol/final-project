@@ -205,7 +205,7 @@ describe("runPipeline", () => {
           durationMs: null,
           listenCount: 100,
           userCount: 50,
-          tags: ["shoegaze"], // LB genre tag only — no mood word
+          tags: ["shoegaze"], // LB genre tag only - no mood word
         },
         {
           mbid: "rec-other",
@@ -218,11 +218,13 @@ describe("runPipeline", () => {
         },
       ]),
       // LF enrichment adds mood tag only for "Chill Track"
-      fetchTrackTagsOnly: vi.fn().mockImplementation((title: string) =>
-        Promise.resolve(
-          title === "Chill Track" ? [{ name: "chill", count: 80 }] : [],
+      fetchTrackTagsOnly: vi
+        .fn()
+        .mockImplementation((title: string) =>
+          Promise.resolve(
+            title === "Chill Track" ? [{ name: "chill", count: 80 }] : [],
+          ),
         ),
-      ),
     });
     const tracks = await runPipeline(
       [TEST_SEED],
