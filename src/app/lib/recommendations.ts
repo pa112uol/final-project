@@ -226,7 +226,8 @@ function deduplicateByMbid(candidateMap: Map<string, Candidate>): void {
 // Collapse variant recordings (remaster/live/single editions) that share a
 // normalized title + artist but carry distinct MBIDs, which deduplicateByMbid
 // cannot catch. Keep the variant with an MBID (enables popularity lookup),
-// then the higher-relevance one.
+// then the one with more listens (tagWeightSum is artist-level and equal for
+// all recordings from the same artist, so it cant break ties here)
 function deduplicateByTitle(candidateMap: Map<string, Candidate>): void {
   const kept = new Map<string, string>(); // normalized key -> surviving map key
   for (const [key, c] of candidateMap) {
@@ -238,7 +239,7 @@ function deduplicateByTitle(candidateMap: Map<string, Candidate>): void {
     }
     const prev = candidateMap.get(prevKey)!;
     const cWins =
-      !!c.mbid !== !!prev.mbid ? !!c.mbid : c.tagWeightSum > prev.tagWeightSum;
+      !!c.mbid !== !!prev.mbid ? !!c.mbid : c.listenCount > prev.listenCount;
     if (cWins) {
       candidateMap.delete(prevKey);
       kept.set(normKey, key);
