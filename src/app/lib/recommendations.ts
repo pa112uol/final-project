@@ -412,13 +412,13 @@ function scoreAndSort(
   novelty: number,
 ): ScoredCandidate[] {
   if (candidates.length === 0) return [];
-  const maxRelevance = Math.max(...candidates.map((c) => c.tagWeightSum));
-  const maxListenCount = Math.max(...candidates.map((c) => c.listenCount), 1);
-  const maxUserCount = Math.max(...candidates.map((c) => c.userCount), 1);
-  const maxArtistListenCount = Math.max(
-    ...candidates.map((c) => c.artistListenCount),
-    1,
-  );
+  let maxRelevance = 0, maxListenCount = 1, maxUserCount = 1, maxArtistListenCount = 1;
+  for (const c of candidates) {
+    if (c.tagWeightSum > maxRelevance) maxRelevance = c.tagWeightSum;
+    if (c.listenCount > maxListenCount) maxListenCount = c.listenCount;
+    if (c.userCount > maxUserCount) maxUserCount = c.userCount;
+    if (c.artistListenCount > maxArtistListenCount) maxArtistListenCount = c.artistListenCount;
+  }
   const logMaxListen = Math.log1p(maxListenCount);
   const logMaxUser = Math.log1p(maxUserCount);
   const logMaxArtist = Math.log1p(maxArtistListenCount);
