@@ -1,6 +1,6 @@
 import type { Seed, Track, PipelineClients } from "./types";
 import { buildCandidates } from "./candidates";
-import { buildTagWeights, MOOD_TAGS, normalizeTag } from "./tags";
+import { buildTagWeights, mergeTags, MOOD_TAGS, normalizeTag } from "./tags";
 import { filterSeeds, deduplicateByMbid, deduplicateByTitle } from "./dedup";
 import { scoreAndSort } from "./scoring";
 import { mmrSelect } from "./diversify";
@@ -37,7 +37,6 @@ export async function runPipeline(
         ":",
         lbTags.map((t) => `${t.name}(${t.count})`).join(", ") || "(none)",
       );
-      const { mergeTags } = await import("./tags");
       return mergeTags(lbTags, lfTags);
     }),
   );
