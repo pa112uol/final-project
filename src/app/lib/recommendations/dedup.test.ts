@@ -102,9 +102,102 @@ describe("filterSeeds", () => {
     expect(result[0].title).toBe("Unrelated Track");
   });
 
-  it("is case-insensitive", () => {
+  it("is case-insensitive for title matching", () => {
     const candidates = [makeCandidate({ title: "SEED SONG" })];
     expect(filterSeeds(candidates, seeds)).toHaveLength(0);
+  });
+
+  it("removes all tracks by the seed artist, not just the exact seed title", () => {
+    const candidates = [
+      makeCandidate({ title: "Seed Song", artist: "Artist A" }),
+      makeCandidate({
+        title: "Other Song by Seed Artist",
+        artist: "Artist A",
+        mbid: "mbid-2",
+      }),
+      makeCandidate({
+        title: "Unrelated Track",
+        artist: "Artist B",
+        mbid: "mbid-3",
+      }),
+    ];
+    const result = filterSeeds(candidates, seeds);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("Unrelated Track");
+  });
+
+  it("is case-insensitive for artist matching", () => {
+    const candidates = [
+      makeCandidate({
+        title: "Another Track",
+        artist: "artist a",
+        mbid: "mbid-2",
+      }),
+    ];
+    expect(filterSeeds(candidates, seeds)).toHaveLength(0);
+  });
+
+  it("excludes all tracks by every seed artist in a multi seed scenario", () => {
+    const multiSeeds: Seed[] = [
+      { mbid: "s1", title: "Song One", artist: "Band One" },
+      { mbid: "s2", title: "Song Two", artist: "Band Two" },
+    ];
+    const candidates = [
+      makeCandidate({ title: "Track by Band One", artist: "Band One" }),
+      makeCandidate({
+        title: "Track by Band Two",
+        artist: "Band Two",
+        mbid: "mbid-2",
+      }),
+      makeCandidate({
+        title: "Track by Other",
+        artist: "Band Three",
+        mbid: "mbid-3",
+      }),
+    ];
+    const result = filterSeeds(candidates, multiSeeds);
+    expect(result).toHaveLength(1);
+    expect(result[0].artist).toBe("Band Three");
+  });
+
+  it("still filters same-title tracks from non-seed artists (covers)", () => {
+    const candidates = [
+      makeCandidate({
+        title: "Seed Song",
+        artist: "Cover Artist",
+        mbid: "mbid-cover",
+      }),
+      makeCandidate({
+        title: "Different Track",
+        artist: "Cover Artist",
+        mbid: "mbid-2",
+      }),
+    ];
+    const result = filterSeeds(candidates, seeds);
+    expect(result).toHaveLength(1);
+    expect(result[0].title).toBe("Different Track");
+  });
+
+  it("with excludeSeedArtists=false, other tracks by the seed artist are kept", () => {
+    const candidates = [
+      makeCandidate({ title: "Seed Song", artist: "Artist A" }),
+      makeCandidate({
+        title: "Other Song by Seed Artist",
+        artist: "Artist A",
+        mbid: "mbid-2",
+      }),
+      makeCandidate({
+        title: "Unrelated Track",
+        artist: "Artist B",
+        mbid: "mbid-3",
+      }),
+    ];
+    const result = filterSeeds(candidates, seeds, false);
+    expect(result).toHaveLength(2);
+    const titles = result.map((c) => c.title);
+    expect(titles).toContain("Other Song by Seed Artist");
+    expect(titles).toContain("Unrelated Track");
+    expect(titles).not.toContain("Seed Song");
   });
 });
 
@@ -112,7 +205,11 @@ describe("deduplicateByMbid", () => {
   it("removes duplicate MBIDs, keeping first occurrence", () => {
     const candidates = [
       makeCandidate({ title: "Song A", mbid: "same-mbid", listenCount: 100 }),
-      makeCandidate({ title: "Song A (Live)", mbid: "same-mbid", listenCount: 200 }),
+      makeCandidate({
+        title: "Song A (Live)",
+        mbid: "same-mbid",
+        listenCount: 200,
+      }),
     ];
     const result = deduplicateByMbid(candidates);
     expect(result).toHaveLength(1);
@@ -143,7 +240,11 @@ describe("deduplicateByTitle", () => {
   it("prefers the candidate with an MBID over one without", () => {
     const candidates = [
       makeCandidate({ title: "Song", mbid: "", listenCount: 9999 }),
-      makeCandidate({ title: "Song - Remastered", mbid: "real-mbid", listenCount: 1 }),
+      makeCandidate({
+        title: "Song - Remastered",
+        mbid: "real-mbid",
+        listenCount: 1,
+      }),
     ];
     const result = deduplicateByTitle(candidates);
     expect(result).toHaveLength(1);
@@ -153,7 +254,11 @@ describe("deduplicateByTitle", () => {
   it("when both have MBIDs, keeps the one with more listens", () => {
     const candidates = [
       makeCandidate({ title: "Song", mbid: "mbid-a", listenCount: 500 }),
-      makeCandidate({ title: "Song (Live)", mbid: "mbid-b", listenCount: 2000 }),
+      makeCandidate({
+        title: "Song (Live)",
+        mbid: "mbid-b",
+        listenCount: 2000,
+      }),
     ];
     const result = deduplicateByTitle(candidates);
     expect(result).toHaveLength(1);
@@ -178,3 +283,4 @@ describe("deduplicateByTitle", () => {
     expect(candidates).toHaveLength(len);
   });
 });
+

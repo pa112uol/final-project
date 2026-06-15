@@ -162,7 +162,7 @@ describe("runPipeline", () => {
         {
           mbid: "rec-happy",
           title: "Happy Track",
-          artistMbid: "mbid-slowdive",
+          artistMbid: "mbid-ride",
           durationMs: null,
           listenCount: 100,
           userCount: 50,
@@ -201,7 +201,7 @@ describe("runPipeline", () => {
         {
           mbid: "rec-chill",
           title: "Chill Track",
-          artistMbid: "mbid-slowdive",
+          artistMbid: "mbid-ride",
           durationMs: null,
           listenCount: 100,
           userCount: 50,
@@ -250,6 +250,31 @@ describe("runPipeline", () => {
       makeClients({ fetchArtistPopularity }),
     );
     expect(fetchArtistPopularity).toHaveBeenCalled();
+  });
+
+  it("excludes all tracks by the seed artist by default", async () => {
+    const tracks = await runPipeline(
+      [TEST_SEED],
+      "fake-api-key",
+      undefined,
+      0,
+      makeClients(),
+    );
+    const artists = tracks.map((t) => t.artist.toLowerCase());
+    expect(artists).not.toContain("slowdive");
+  });
+
+  it("allows seed artist tracks when excludeSeedArtists=false", async () => {
+    const tracks = await runPipeline(
+      [TEST_SEED],
+      "fake-api-key",
+      undefined,
+      0,
+      makeClients(),
+      false,
+    );
+    const artists = tracks.map((t) => t.artist.toLowerCase());
+    expect(artists).toContain("slowdive");
   });
 });
 

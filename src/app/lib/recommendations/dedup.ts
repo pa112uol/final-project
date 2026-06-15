@@ -25,9 +25,13 @@ export function titlesOverlap(a: string, b: string): boolean {
 export function filterSeeds(
   candidates: Candidate[],
   seeds: Seed[],
+  excludeSeedArtists = true,
 ): Candidate[] {
+  const seedArtists = new Set(seeds.map((s) => s.artist.toLowerCase()));
   const seedTitles = seeds.map((s) => s.title.toLowerCase());
   return candidates.filter((c) => {
+    if (excludeSeedArtists && seedArtists.has(c.artist.toLowerCase()))
+      return false;
     const ct = c.title.toLowerCase();
     return !seedTitles.some((t) => titlesOverlap(t, ct));
   });

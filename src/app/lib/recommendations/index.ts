@@ -32,6 +32,15 @@ export function getRecommendations(
   apiKey: string,
   mood?: string,
   novelty = 0,
+  excludeSeedArtists = true,
 ): Promise<Track[]> {
-  return runPipeline(seeds, apiKey, mood, novelty, realClients);
+  return runPipeline(
+    seeds,
+    apiKey,
+    mood,
+    novelty,
+    realClients,
+    excludeSeedArtists,
+  );
 }
+

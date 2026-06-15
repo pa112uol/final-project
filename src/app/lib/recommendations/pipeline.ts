@@ -18,6 +18,7 @@ export async function runPipeline(
   mood: string | undefined,
   novelty: number,
   clients: PipelineClients,
+  excludeSeedArtists = true,
 ): Promise<Track[]> {
   console.log(
     `[pipeline:entry] seeds:${seeds.length} mood:${mood ?? "none"} novelty:${novelty}`,
@@ -107,7 +108,11 @@ export async function runPipeline(
     );
   }
 
-  const afterFilterSeeds = filterSeeds(rawCandidates, seeds);
+  const afterFilterSeeds = filterSeeds(
+    rawCandidates,
+    seeds,
+    excludeSeedArtists,
+  );
   console.log(
     `[pipeline:dedup] after filterSeeds:${afterFilterSeeds.length} (removed:${rawCandidates.length - afterFilterSeeds.length})`,
   );
