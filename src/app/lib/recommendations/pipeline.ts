@@ -105,42 +105,32 @@ export async function runPipeline(
   candidates = deduplicateByMbid(candidates);
   candidates = deduplicateByTitle(candidates);
 
-  // Fetch LF track tags for same-artist pairs that still have no track-level
-  // signal - only these need tie-breaking; skipping solos avoids the cost
-  // when there's nothing to differentiate.
-  const zeroScoreByArtist = new Map<string, typeof candidates>();
-  for (const c of candidates) {
-    if (c.trackTagScore === 0) {
-      const key = c.artist.toLowerCase();
-      if (!zeroScoreByArtist.has(key)) zeroScoreByArtist.set(key, []);
-      zeroScoreByArtist.get(key)!.push(c);
-    }
-  }
-  const tieBreakCandidates = [...zeroScoreByArtist.values()]
-    .filter((cs) => cs.length >= 2)
-    .flat();
-
+  // Enrich all candidates with LF track tags. This serves two purposes:
+  // (1) enables mood boosting — LB recording tags are genre-only (e.g. "shoegaze")
+  //     and never contain mood words; without this step the mood multiplier never
+  //     fires; (2) provides track-level signal for same-artist tie-breaking that the
+  //     shared artist tagWeightSum cannot resolve.
+  // Tags are merged rather than replaced so LB genre labels are preserved for MMR.
   await Promise.allSettled(
-    tieBreakCandidates.map(async (c) => {
+    candidates.map(async (c) => {
       const lfTags = await clients.fetchTrackTagsOnly(
         c.title,
         c.artist,
         apiKey,
         c.mbid || undefined,
       );
-      if (lfTags.length === 0) {
-        console.log(`[tiebreak] "${c.title}" – ${c.artist}: no LF tags`);
-        return;
-      }
-      c.tags = lfTags.map((t) => t.name);
+      if (lfTags.length === 0) return;
+      const existingLower = new Set(c.tags.map((t) => t.toLowerCase()));
+      const newTags = lfTags
+        .map((t) => t.name)
+        .filter((t) => !existingLower.has(t.toLowerCase()));
+      if (newTags.length === 0) return;
+      c.tags = [...c.tags, ...newTags];
       c.trackTagScore = c.tags.reduce(
         (sum, tag) =>
           sum +
           (normalizedTagWeights.get(normalizeTag(tag.toLowerCase())) ?? 0),
         0,
-      );
-      console.log(
-        `[tiebreak] "${c.title}" – ${c.artist}: tags=[${c.tags.slice(0, 6).join(", ")}] trackTagScore=${c.trackTagScore.toFixed(1)}`,
       );
     }),
   );

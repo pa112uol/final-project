@@ -193,6 +193,51 @@ describe("runPipeline", () => {
     }
   });
 
+  it("mood boost fires via LF tags when LB recording tags contain no mood words", async () => {
+    // This is the scenario the old tie-break-only logic could NOT handle:
+    // LB tags are pure genre labels; mood words come only from LF enrichment.
+    const clients = makeClients({
+      fetchArtistTopRecordings: vi.fn().mockResolvedValue([
+        {
+          mbid: "rec-chill",
+          title: "Chill Track",
+          artistMbid: "mbid-slowdive",
+          durationMs: null,
+          listenCount: 100,
+          userCount: 50,
+          tags: ["shoegaze"], // LB genre tag only — no mood word
+        },
+        {
+          mbid: "rec-other",
+          title: "Other Track",
+          artistMbid: "mbid-ride",
+          durationMs: null,
+          listenCount: 100,
+          userCount: 50,
+          tags: ["shoegaze"], // same LB genre tag
+        },
+      ]),
+      // LF enrichment adds mood tag only for "Chill Track"
+      fetchTrackTagsOnly: vi.fn().mockImplementation((title: string) =>
+        Promise.resolve(
+          title === "Chill Track" ? [{ name: "chill", count: 80 }] : [],
+        ),
+      ),
+    });
+    const tracks = await runPipeline(
+      [TEST_SEED],
+      "fake-api-key",
+      "chill",
+      0,
+      clients,
+    );
+    const chillIdx = tracks.findIndex((t) => t.mbid === "rec-chill");
+    const otherIdx = tracks.findIndex((t) => t.mbid === "rec-other");
+    expect(chillIdx).toBeGreaterThanOrEqual(0);
+    expect(otherIdx).toBeGreaterThanOrEqual(0);
+    expect(chillIdx).toBeLessThan(otherIdx);
+  });
+
   it("respects novelty=1 by using artist popularity client", async () => {
     const fetchArtistPopularity = vi.fn().mockResolvedValue(new Map());
     await runPipeline(
