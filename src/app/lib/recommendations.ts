@@ -15,7 +15,7 @@ const TOP_TAGS_COUNT = 6;
 const ARTISTS_PER_TAG = 30;
 const TOP_ARTISTS_COUNT = 15;
 const TRACKS_PER_ARTIST = 5;
-const MOOD_BOOST_WEIGHT = 1_000;
+const MOOD_MULTIPLIER = 1.5;
 const MMR_LAMBDA = 0.7;
 
 // Last.fm user-collection tags, describe listening habits, not musical content.
@@ -638,7 +638,7 @@ export async function getRecommendations(
     const moodTagSet = new Set(MOOD_TAGS[mood]);
     for (const c of candidateMap.values()) {
       if (c.tags.some((t) => moodTagSet.has(t.toLowerCase()))) {
-        c.tagWeightSum += MOOD_BOOST_WEIGHT;
+        c.tagWeightSum *= MOOD_MULTIPLIER;
       }
     }
   }
