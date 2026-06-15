@@ -213,10 +213,17 @@ export async function runPipeline(
       artistCapDropped.join(", "),
     );
   }
+  const withTagMatch = afterArtistCap.filter((c) => c.trackTagScore > 0);
+  const preMMR =
+    withTagMatch.length >= RECOMMENDATION_LIMIT ? withTagMatch : afterArtistCap;
   console.log(
-    `[pipeline:mmr] selecting ${RECOMMENDATION_LIMIT} from ${afterArtistCap.length} scored candidates`,
+    `[pipeline:tagfloor] ${afterArtistCap.length - withTagMatch.length} tracks with no seed tag match — ` +
+      (preMMR === withTagMatch ? "excluded" : "kept (pool too small to filter)"),
   );
-  const top = mmrSelect(afterArtistCap, RECOMMENDATION_LIMIT);
+  console.log(
+    `[pipeline:mmr] selecting ${RECOMMENDATION_LIMIT} from ${preMMR.length} scored candidates`,
+  );
+  const top = mmrSelect(preMMR, RECOMMENDATION_LIMIT);
 
   console.log(
     "[candidates:final]\n" +

@@ -149,5 +149,45 @@ describe("scoreAndSort", () => {
     expect(typeof result[0].relevanceScore).toBe("number");
     expect(typeof result[0].noveltyScore).toBe("number");
   });
+
+  it("penalizes candidates with no track tag match (trackTagScore=0) vs ones with matching tags", () => {
+    const withTagMatch = makeCandidate({
+      tagWeightSum: 100,
+      trackTagScore: 50,
+      listenCount: 0,
+      mbid: "matched",
+    });
+    const noTagMatch = makeCandidate({
+      tagWeightSum: 100,
+      trackTagScore: 0,
+      listenCount: 0,
+      mbid: "unmatched",
+    });
+    const result = scoreAndSort([withTagMatch, noTagMatch], 0);
+    expect(result[0].mbid).toBe("matched");
+    expect(result[0].relevanceScore).toBeGreaterThan(result[1].relevanceScore);
+  });
+
+  it("trackTagScore=0 fallback is 0.5× artistNorm, not full artistNorm", () => {
+    // Candidate A: trackTagScore matches half of max, candidate B: no match.
+    // At 60/40 blend and max tagWeightSum = 100:
+    // A: artistNorm=1, trackTagNorm=1 (trackTagScore=max) => relevance=1.0
+    // B: artistNorm=1, trackTagNorm=0.5 (fallback) => relevance=0.8
+    const maxTagCandidate = makeCandidate({
+      tagWeightSum: 100,
+      trackTagScore: 100,
+      mbid: "max",
+    });
+    const zeroTagCandidate = makeCandidate({
+      tagWeightSum: 100,
+      trackTagScore: 0,
+      mbid: "zero",
+    });
+    const result = scoreAndSort([maxTagCandidate, zeroTagCandidate], 0);
+    // Zero-tag should rank second and have strictly lower relevance
+    expect(result[0].mbid).toBe("max");
+    expect(result[1].mbid).toBe("zero");
+    expect(result[1].relevanceScore).toBeLessThan(result[0].relevanceScore);
+  });
 });
 

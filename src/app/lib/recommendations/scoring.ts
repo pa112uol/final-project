@@ -44,7 +44,7 @@ export function scoreAndSort(
 
   // First pass: obscurity for candidates with any popularity data. Recording
   // count is the more specific signal. Blend listen count (scale) with user
-  // count (breadth) so repeat-play niche hits don't outscore genuinely popular tracks.
+  // count (breadth) so repeat-play niche hits don't outscore genuinely popular tracks
   const obscurity = new Map<Candidate, number>();
   const known: number[] = [];
   for (const c of candidates) {
@@ -71,18 +71,18 @@ export function scoreAndSort(
     known.push(o);
   }
   // Tracks with no popularity data get the median observed obscurity, not a
-  // hardcoded 0.5, so they sit neutrally within the actual distribution.
+  // hardcoded 0.5, so they sit neutrally within the actual distribution
   const neutral = known.length > 0 ? median(known) : 0.5;
 
   // Compute raw relevance and obscurity before normalizing so we can min-max
-  // scale both to [0,1]. Without this, relevance clusters near the top of its
-  // range while obscurity spans the full range, making ν=0.5 biased toward relevance.
+  // scale both to [0,1]. Without this relevance clusters near the top of its
+  // range while obscurity spans the full range, making ν=0.5 biased toward relevance
   const rawScores = candidates.map((c) => {
     const artistNorm = maxRelevance > 0 ? c.tagWeightSum / maxRelevance : 0;
     const trackTagNorm =
       maxTrackTagScore > 0 && c.trackTagScore > 0
         ? c.trackTagScore / maxTrackTagScore
-        : artistNorm;
+        : artistNorm * 0.5; // Penalize tracks with no tag match against seed profile
     return {
       c,
       relevance:
