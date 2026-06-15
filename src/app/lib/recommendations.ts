@@ -1,4 +1,9 @@
-import { fetchTrackTags, fetchTrackTagsOnly, fetchTagArtists, LFTag } from "@/app/lib/lastfm";
+import {
+  fetchTrackTags,
+  fetchTrackTagsOnly,
+  fetchTagArtists,
+  LFTag,
+} from "@/app/lib/lastfm";
 import {
   fetchArtistPopularity,
   fetchArtistTopRecordings,
@@ -313,7 +318,14 @@ function buildTagWeights(seedTagSets: LFTag[][]): Map<string, number> {
 async function buildCandidates(
   topTags: [string, number][],
   apiKey: string,
+  novelty: number,
 ): Promise<Map<string, Candidate>> {
+  // At higher novelty fetch deeper pages of tag.getTopArtists so the long
+  // tail of less popular artists enters the pool. Page 1 is always included
+  // so relevant artists are never dropped at any novelty level
+  const pagesToFetch = 1 + Math.round(novelty * 2); // 1–3 pages
+  const topArtistsCount = Math.round(TOP_ARTISTS_COUNT * (1 + novelty)); // 15–30
+
   // Phase A: score artists by how many weighted tags they appear in
   const artistScores = new Map<
     string,
@@ -322,32 +334,40 @@ async function buildCandidates(
   const artistTags = new Map<string, Set<string>>();
 
   await Promise.allSettled(
-    topTags.map(async ([tag, tagWeight]) => {
-      const artists = await fetchTagArtists(tag, 1, ARTISTS_PER_TAG, apiKey);
-      for (const artist of artists) {
-        const key = artist.name.toLowerCase();
-        const existing = artistScores.get(key);
-        if (existing) {
-          existing.tagWeightSum += tagWeight;
-          if (!existing.mbid && artist.mbid) existing.mbid = artist.mbid;
-        } else {
-          artistScores.set(key, {
-            name: artist.name,
-            tagWeightSum: tagWeight,
-            mbid: artist.mbid ?? "",
-          });
-        }
-        if (!artistTags.has(key)) artistTags.set(key, new Set());
-        artistTags.get(key)!.add(tag);
-      }
-    }),
+    topTags.flatMap(([tag, tagWeight]) =>
+      Array.from({ length: pagesToFetch }, (_, pageIdx) =>
+        fetchTagArtists(tag, pageIdx + 1, ARTISTS_PER_TAG, apiKey).then(
+          (artists) => {
+            for (const artist of artists) {
+              const key = artist.name.toLowerCase();
+              if (!artistTags.has(key)) artistTags.set(key, new Set());
+              // Guard against crediting the same tag twice if an artist appears
+              // on multiple pages of the same tag result
+              const tagAlreadyCredited = artistTags.get(key)!.has(tag);
+              artistTags.get(key)!.add(tag);
+              const existing = artistScores.get(key);
+              if (existing) {
+                if (!tagAlreadyCredited) existing.tagWeightSum += tagWeight;
+                if (!existing.mbid && artist.mbid) existing.mbid = artist.mbid;
+              } else {
+                artistScores.set(key, {
+                  name: artist.name,
+                  tagWeightSum: tagWeight,
+                  mbid: artist.mbid ?? "",
+                });
+              }
+            }
+          },
+        ),
+      ),
+    ),
   );
 
   const topArtists = [...artistScores.values()]
     .sort(
       (a, b) => b.tagWeightSum - a.tagWeightSum || a.name.localeCompare(b.name),
     )
-    .slice(0, TOP_ARTISTS_COUNT);
+    .slice(0, topArtistsCount);
 
   console.log(
     "[candidates] top artists:",
@@ -414,13 +434,18 @@ function scoreAndSort(
   novelty: number,
 ): ScoredCandidate[] {
   if (candidates.length === 0) return [];
-  let maxRelevance = 0, maxTrackTagScore = 0, maxListenCount = 1, maxUserCount = 1, maxArtistListenCount = 1;
+  let maxRelevance = 0,
+    maxTrackTagScore = 0,
+    maxListenCount = 1,
+    maxUserCount = 1,
+    maxArtistListenCount = 1;
   for (const c of candidates) {
     if (c.tagWeightSum > maxRelevance) maxRelevance = c.tagWeightSum;
     if (c.trackTagScore > maxTrackTagScore) maxTrackTagScore = c.trackTagScore;
     if (c.listenCount > maxListenCount) maxListenCount = c.listenCount;
     if (c.userCount > maxUserCount) maxUserCount = c.userCount;
-    if (c.artistListenCount > maxArtistListenCount) maxArtistListenCount = c.artistListenCount;
+    if (c.artistListenCount > maxArtistListenCount)
+      maxArtistListenCount = c.artistListenCount;
   }
   const logMaxListen = Math.log1p(maxListenCount);
   const logMaxUser = Math.log1p(maxUserCount);
@@ -476,8 +501,10 @@ function scoreAndSort(
     };
   });
 
-  let minRel = Infinity, maxRel = -Infinity;
-  let minObs = Infinity, maxObs = -Infinity;
+  let minRel = Infinity,
+    maxRel = -Infinity;
+  let minObs = Infinity,
+    maxObs = -Infinity;
   for (const { relevance, obs } of rawScores) {
     if (relevance < minRel) minRel = relevance;
     if (relevance > maxRel) maxRel = relevance;
@@ -486,7 +513,9 @@ function scoreAndSort(
   }
   const rangeRel = maxRel - minRel || 1;
   const rangeObs = maxObs - minObs || 1;
-  console.log(`[score] rel range [${minRel.toFixed(3)}, ${maxRel.toFixed(3)}]  obs range [${minObs.toFixed(3)}, ${maxObs.toFixed(3)}]`);
+  console.log(
+    `[score] rel range [${minRel.toFixed(3)}, ${maxRel.toFixed(3)}]  obs range [${minObs.toFixed(3)}, ${maxObs.toFixed(3)}]`,
+  );
 
   return rawScores
     .map(({ c, relevance, obs }): ScoredCandidate => {
@@ -567,8 +596,8 @@ export async function getRecommendations(
   );
 
   const candidateMap = new Map(
-    [...(await buildCandidates(fetchTags, apiKey)).entries()].sort(([a], [b]) =>
-      a.localeCompare(b),
+    [...(await buildCandidates(fetchTags, apiKey, novelty)).entries()].sort(
+      ([a], [b]) => a.localeCompare(b),
     ),
   );
 
@@ -578,7 +607,8 @@ export async function getRecommendations(
   }
   for (const c of candidateMap.values()) {
     c.trackTagScore = c.tags.reduce(
-      (sum, tag) => sum + (normalizedTagWeights.get(normalizeTag(tag.toLowerCase())) ?? 0),
+      (sum, tag) =>
+        sum + (normalizedTagWeights.get(normalizeTag(tag.toLowerCase())) ?? 0),
       0,
     );
   }
@@ -589,7 +619,7 @@ export async function getRecommendations(
 
   // Fetch LF track tags for same-artist pairs that still have no track-level
   // signal — only these need tie-breaking, and skipping solos avoids the cost
-  // when there's nothing to differentiate.
+  // when there's nothing to differentiate
   const zeroScoreByArtist = new Map<string, Candidate[]>();
   for (const c of candidateMap.values()) {
     if (c.trackTagScore === 0) {
@@ -604,14 +634,21 @@ export async function getRecommendations(
 
   await Promise.allSettled(
     tieBreakCandidates.map(async (c) => {
-      const lfTags = await fetchTrackTagsOnly(c.title, c.artist, apiKey, c.mbid || undefined);
+      const lfTags = await fetchTrackTagsOnly(
+        c.title,
+        c.artist,
+        apiKey,
+        c.mbid || undefined,
+      );
       if (lfTags.length === 0) {
         console.log(`[tiebreak] "${c.title}" – ${c.artist}: no LF tags`);
         return;
       }
       c.tags = lfTags.map((t) => t.name);
       c.trackTagScore = c.tags.reduce(
-        (sum, tag) => sum + (normalizedTagWeights.get(normalizeTag(tag.toLowerCase())) ?? 0),
+        (sum, tag) =>
+          sum +
+          (normalizedTagWeights.get(normalizeTag(tag.toLowerCase())) ?? 0),
         0,
       );
       console.log(
