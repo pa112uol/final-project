@@ -14,11 +14,22 @@ export interface MBTrackResult {
   artist: string;
 }
 
+function buildMbQuery(q: string): string {
+  const escape = (s: string) => s.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, "\\$&");
+
+  // "artist - track" => split into dedicated fields for precision
+  const dashMatch = q.match(/^(.+?)\s+-\s+(.+)$/);
+  if (dashMatch) {
+    return `recording:(${escape(dashMatch[2].trim())})^2 AND artist:(${escape(dashMatch[1].trim())})`;
+  }
+
+  // Free-text: search both fields with all words, boost title matches
+  const escaped = escape(q);
+  return `recording:(${escaped})^2 AND artist:(${escaped})`;
+}
+
 export async function searchTracks(q: string): Promise<MBTrackResult[]> {
-  // Search both title and artist fields with all query words so "radiohead creep"
-  // ranks Radiohead's own Creep above covers titled "Creep (Radiohead)".
-  const escaped = q.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, "\\$&");
-  const query = `recording:(${escaped}) AND artist:(${escaped})`;
+  const query = buildMbQuery(q);
 
   const url = new URL(`${MB_BASE}/recording`);
   url.searchParams.set("query", query);
@@ -64,3 +75,4 @@ export async function resolveCanonicalMbid(mbid: string): Promise<string> {
     return mbid;
   }
 }
+
