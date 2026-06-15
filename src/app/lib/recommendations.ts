@@ -280,10 +280,7 @@ function mergeTags(
   }));
 }
 
-function buildTagWeights(
-  seedTagSets: LFTag[][],
-  mood?: string,
-): Map<string, number> {
+function buildTagWeights(seedTagSets: LFTag[][]): Map<string, number> {
   const totalSeeds = Math.max(seedTagSets.length, 1);
   const tagTF = new Map<string, number>(); // norm => total count
   const tagDF = new Map<string, number>(); // norm => doc frequency
@@ -307,12 +304,6 @@ function buildTagWeights(
     const df = tagDF.get(norm) ?? 1;
     const idf = Math.log((totalSeeds + 1) / (df + 1)) + 1;
     weights.set(tagOriginal.get(norm)!, tf * idf);
-  }
-
-  if (mood && MOOD_TAGS[mood]) {
-    for (const tag of MOOD_TAGS[mood]) {
-      weights.set(tag, MOOD_BOOST_WEIGHT);
-    }
   }
 
   return weights;
@@ -516,7 +507,7 @@ export async function getRecommendations(
   );
   console.log("[tags/merged]\n" + mergedSummary.join("\n"));
 
-  const tagWeights = buildTagWeights(seedTagSets, mood);
+  const tagWeights = buildTagWeights(seedTagSets);
   const sortedTags = [...tagWeights.entries()].sort((a, b) => b[1] - a[1]);
 
   if (sortedTags.length === 0) return [];
@@ -564,6 +555,15 @@ export async function getRecommendations(
     if (candidate.listenCount === 0) {
       const count = lbArtistPopularity.get(candidate.artistMbid);
       if (count !== undefined) candidate.artistListenCount = count;
+    }
+  }
+
+  if (mood && MOOD_TAGS[mood]) {
+    const moodTagSet = new Set(MOOD_TAGS[mood]);
+    for (const c of candidateMap.values()) {
+      if (c.tags.some((t) => moodTagSet.has(t.toLowerCase()))) {
+        c.tagWeightSum += MOOD_BOOST_WEIGHT;
+      }
     }
   }
 
