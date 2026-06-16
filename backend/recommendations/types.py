@@ -36,6 +36,7 @@ class Track:
     streaming: StreamingLinks
     relevance_score: float
     novelty_score: float
+    tags: list = field(default_factory=list)
 
     def to_dict(self):
         return {
@@ -59,6 +60,7 @@ class Track:
             },
             "relevanceScore": self.relevance_score,
             "noveltyScore": self.novelty_score,
+            "tags": self.tags,
         }
 
 

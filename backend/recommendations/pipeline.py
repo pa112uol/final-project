@@ -324,6 +324,7 @@ async def run_pipeline(
         duration_ms = c.duration_ms if hasattr(c, "duration_ms") else c.get("duration_ms")
         rel_score = c.relevance_score if hasattr(c, "relevance_score") else c["relevance_score"]
         nov_score = c.novelty_score if hasattr(c, "novelty_score") else c["novelty_score"]
+        tags = c.tags if hasattr(c, "tags") else c.get("tags", [])
         streaming = await clients.get_streaming_links(artist, title)
         return Track(
             mbid=mbid,
@@ -336,6 +337,7 @@ async def run_pipeline(
             streaming=streaming,
             relevance_score=rel_score,
             novelty_score=nov_score,
+            tags=tags,
         )
 
     return list(await asyncio.gather(*[make_track(c) for c in top]))

@@ -18,6 +18,7 @@ interface Track {
   streaming: StreamingLinks;
   relevanceScore: number;
   noveltyScore: number;
+  tags: string[];
 }
 
 interface TracksListProps {
@@ -100,6 +101,19 @@ function TrackCard({ track }: { track: Track }) {
           </a>
         )}
       </div>
+
+      {track.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {track.tags.slice(0, 5).map((tag) => (
+            <span
+              key={tag}
+              className="px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 text-xs"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div className="text-xs text-gray-600 flex gap-3">
         <span>Relevance {(track.relevanceScore * 100).toFixed(0)}%</span>
