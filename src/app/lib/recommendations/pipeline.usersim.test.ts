@@ -149,12 +149,14 @@ describe("UserSim A – Mainstream synth-pop: 'Blinding Lights' – The Weeknd",
 
   beforeAll(async () => {
     if (!API_KEY) return;
+    const t0 = Date.now();
     tracks = await getRecommendations(
       [{ mbid: "", title: "blinding lights", artist: "the weeknd" }],
       API_KEY,
       undefined,
       0,
     );
+    console.log(`\n[TIME] UserSim A (synth-pop): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
     report = analyseQuality("Synth-pop (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -191,12 +193,14 @@ describe("UserSim B – Hip-hop: 'HUMBLE.' – Kendrick Lamar", () => {
 
   beforeAll(async () => {
     if (!API_KEY) return;
+    const t0 = Date.now();
     tracks = await getRecommendations(
       [{ mbid: "", title: "humble", artist: "kendrick lamar" }],
       API_KEY,
       undefined,
       0,
     );
+    console.log(`\n[TIME] UserSim B (hip-hop): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
     report = analyseQuality("Hip-hop (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -235,12 +239,14 @@ describe("UserSim C – Classic rock: 'Stairway to Heaven' – Led Zeppelin", ()
 
   beforeAll(async () => {
     if (!API_KEY) return;
+    const t0 = Date.now();
     tracks = await getRecommendations(
       [{ mbid: "", title: "stairway to heaven", artist: "led zeppelin" }],
       API_KEY,
       undefined,
       0,
     );
+    console.log(`\n[TIME] UserSim C (classic rock): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
     report = analyseQuality("Classic rock (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -269,12 +275,14 @@ describe("UserSim D – Ultra-niche: 'Alien Observer' – Grouper", () => {
 
   beforeAll(async () => {
     if (!API_KEY) return;
+    const t0 = Date.now();
     tracks = await getRecommendations(
       [{ mbid: "", title: "alien observer", artist: "grouper" }],
       API_KEY,
       undefined,
       0,
     );
+    console.log(`\n[TIME] UserSim D (ultra-niche): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
     report = analyseQuality("Ultra-niche Grouper (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -304,6 +312,7 @@ describe("UserSim E – Multi-seed indie: The National + Bon Iver", () => {
 
   beforeAll(async () => {
     if (!API_KEY) return;
+    const t0 = Date.now();
     [tracksNational, tracksBonIver, tracksMulti] = await Promise.all([
       getRecommendations(
         [{ mbid: "", title: "bloodbuzz ohio", artist: "the national" }],
@@ -327,6 +336,7 @@ describe("UserSim E – Multi-seed indie: The National + Bon Iver", () => {
         0,
       ),
     ]);
+    console.log(`\n[TIME] UserSim E (multi-seed, 3x parallel): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
     const rN = analyseQuality("National only", tracksNational);
     const rB = analyseQuality("Bon Iver only", tracksBonIver);
     const rM = analyseQuality("National + Bon Iver multi-seed", tracksMulti);
@@ -410,11 +420,13 @@ describe("UserSim F – Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' – Massive 
   beforeAll(async () => {
     if (!API_KEY) return;
     const seed = [{ mbid: "", title: "teardrop", artist: "massive attack" }];
+    const tStart = Date.now();
     [t0, t5, t1] = await Promise.all([
       getRecommendations(seed, API_KEY, undefined, 0),
       getRecommendations(seed, API_KEY, undefined, 0.5),
       getRecommendations(seed, API_KEY, undefined, 1),
     ]);
+    console.log(`\n[TIME] UserSim F (novelty gradient, 3x parallel): ${((Date.now() - tStart) / 1000).toFixed(2)}s`);
 
     const avg = (arr: Track[], fn: (t: Track) => number) =>
       arr.length ? arr.reduce((s, t) => s + fn(t), 0) / arr.length : 0;

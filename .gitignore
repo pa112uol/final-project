@@ -19,6 +19,14 @@
 
 # production
 /build
+/dist
+
+# react / vite
+.cache/
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+frontend/build/
 
 # misc
 .DS_Store
@@ -39,3 +47,19 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.venv/
+venv/
+*.egg-info/
+dist/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.sqlite3

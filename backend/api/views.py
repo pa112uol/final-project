@@ -1,0 +1,185 @@
+import asyncio
+import random
+import time
+import logging
+from django.http import JsonResponse
+from django.conf import settings
+from django.views.decorators.http import require_GET
+
+logger = logging.getLogger(__name__)
+
+
+def _run_async(coro):
+    """Run an async coroutine from a sync Django view."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+    except RuntimeError:
+        pass
+    return asyncio.run(coro)
+
+
+@require_GET
+def recommendations(request):
+    start_ms = int(time.time() * 1000)
+    req_id = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=5))
+
+    def log(phase, data):
+        logger.info("[REC:%s %s +%dms] %s", phase, req_id, int(time.time() * 1000) - start_ms, data)
+
+    api_key = settings.LASTFM_API_KEY
+    if not api_key:
+        return JsonResponse({"error": "LASTFM_API_KEY not set"}, status=500)
+
+    mbids = request.GET.getlist("mbid")
+    titles = request.GET.getlist("title")
+    artists = request.GET.getlist("artist")
+    mood_raw = request.GET.get("mood", "").lower().strip() or None
+    novelty_raw = request.GET.get("novelty", "0")
+
+    try:
+        novelty = float(novelty_raw)
+    except (ValueError, TypeError):
+        novelty = 0.0
+    novelty = max(0.0, min(1.0, novelty))
+
+    if not mbids:
+        return JsonResponse({"error": "No seed tracks provided"}, status=400)
+
+    from recommendations.tags import MOOD_TAGS
+
+    if mood_raw and mood_raw not in MOOD_TAGS:
+        return JsonResponse(
+            {
+                "error": f"Unknown mood. Valid values: {', '.join(MOOD_TAGS.keys())}"
+            },
+            status=400,
+        )
+
+    seeds = [
+        {
+            "mbid": mbid,
+            "title": (titles[i] if i < len(titles) else "").lower().strip(),
+            "artist": (artists[i] if i < len(artists) else "").lower().strip(),
+        }
+        for i, mbid in enumerate(mbids)
+    ]
+
+    log("input", {"seeds": seeds, "mood": mood_raw, "novelty": novelty})
+
+    from recommendations.index import get_recommendations
+
+    try:
+        tracks = _run_async(get_recommendations(seeds, api_key, mood_raw, novelty))
+    except Exception as err:
+        logger.error("[REC] pipeline error: %s", err, exc_info=True)
+        return JsonResponse({"error": "Failed to fetch recommendations"}, status=500)
+
+    log("result", {"tracksReturned": len(tracks), "totalMs": int(time.time() * 1000) - start_ms})
+
+    return JsonResponse({"tracks": [t.to_dict() for t in tracks]})
+
+
+@require_GET
+def search(request):
+    q = (request.GET.get("q") or "").strip()
+    if not q:
+        return JsonResponse({"results": []})
+
+    from clients.musicbrainz import search_tracks
+
+    tracks = _run_async(search_tracks(q))
+    results = [
+        {"type": "track", "mbid": t["mbid"], "label": t["title"], "sub": t["artist"]}
+        for t in tracks
+    ]
+    return JsonResponse({"results": results})
+
+
+_tracks_cache = None
+_tracks_cache_expires = 0
+
+
+@require_GET
+def tracks(request):
+    global _tracks_cache, _tracks_cache_expires
+
+    MB_BASE = "https://musicbrainz.org/ws/2"
+    RESPONSE_LIMIT = 5
+    CACHE_TTL_S = 60
+
+    async def build_pool():
+        from clients.mb import mb_fetch
+
+        letter = random.choice("abcdefghijklmnopqrstuvwxyz")
+        offset = random.randint(0, 399)
+        url = (
+            f"{MB_BASE}/recording"
+            f"?query=recording:{letter}*"
+            f"&offset={offset}&limit=25"
+            f"&inc=artist-credits+releases&fmt=json"
+        )
+        res = await mb_fetch(url)
+        if not res.is_success:
+            raise ValueError(f"MusicBrainz responded with {res.status_code}")
+        data = res.json()
+        recordings = data.get("recordings", [])
+        pool = []
+        for r in recordings:
+            credits = r.get("artist-credit") or []
+            credit = credits[0] if credits else None
+            artist = (
+                credit.get("name") or (credit.get("artist") or {}).get("name") or "Unknown"
+                if credit else "Unknown"
+            )
+            artist_mbid = (credit.get("artist") or {}).get("id", "") if credit else ""
+            releases = [
+                {"mbid": rel["id"], "title": rel["title"], "date": rel.get("date")}
+                for rel in (r.get("releases") or [])
+            ]
+            pool.append({
+                "mbid": r["id"],
+                "title": r["title"],
+                "artist": artist,
+                "artistMbid": artist_mbid,
+                "durationMs": r.get("length"),
+                "firstReleaseDate": r.get("first-release-date"),
+                "releases": releases,
+            })
+        return pool
+
+    now = time.time()
+    if _tracks_cache is None or now > _tracks_cache_expires:
+        try:
+            pool = _run_async(build_pool())
+            _tracks_cache = pool
+            _tracks_cache_expires = now + CACHE_TTL_S
+        except Exception:
+            return JsonResponse(
+                {"error": "Failed to fetch tracks from MusicBrainz"}, status=502
+            )
+
+    selected = random.sample(
+        _tracks_cache, min(RESPONSE_LIMIT, len(_tracks_cache))
+    )
+
+    from clients.streaming import get_streaming_links
+
+    async def enrich(track):
+        streaming = await get_streaming_links(track["artist"], track["title"])
+        return {
+            **track,
+            "streaming": {
+                "appleMusic": streaming.apple_music,
+                "preview": streaming.preview,
+                "youtubeVideoId": streaming.youtube_video_id,
+                "spotify": streaming.spotify,
+            },
+        }
+
+    enriched = _run_async(asyncio.gather(*[enrich(t) for t in selected]))
+    return JsonResponse({"tracks": list(enriched)})
