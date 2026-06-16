@@ -40,19 +40,56 @@ function releaseYear(track: Track): string | null {
   return date ? date.slice(0, 4) : null;
 }
 
+function CoverArt({ releaseMbid }: { releaseMbid: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/coverart/?mbid=${encodeURIComponent(releaseMbid)}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((data) => { if (!cancelled) setUrl(data.url); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [releaseMbid]);
+
+  if (loading) {
+    return <div className="w-16 h-16 rounded-lg bg-gray-700 animate-pulse flex-shrink-0" />;
+  }
+  if (!url) {
+    return (
+      <div className="w-16 h-16 rounded-lg bg-gray-700 flex items-center justify-center flex-shrink-0">
+        <svg className="w-6 h-6 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <img
+      src={url}
+      alt="Album art"
+      className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+    />
+  );
+}
+
 function TrackCard({ track }: { track: Track }) {
   const year = releaseYear(track);
   const duration = fmtDuration(track.durationMs);
-
   return (
     <div className="bg-gray-800 rounded-xl p-4 space-y-3">
-      <div>
-        <h3 className="font-semibold text-lg leading-tight">{track.title}</h3>
-        <p className="text-gray-400 text-sm">
-          {track.artist}
-          {year && <span className="ml-2 text-gray-500">{year}</span>}
-          {duration && <span className="ml-2 text-gray-500">{duration}</span>}
-        </p>
+      <div className="flex gap-3 items-start">
+        {track.mbid && <CoverArt releaseMbid={track.mbid} />}
+        <div className="min-w-0">
+          <h3 className="font-semibold text-lg leading-tight">{track.title}</h3>
+          <p className="text-gray-400 text-sm">
+            {track.artist}
+            {year && <span className="ml-2 text-gray-500">{year}</span>}
+            {duration && <span className="ml-2 text-gray-500">{duration}</span>}
+          </p>
+        </div>
       </div>
 
       {track.streaming.youtubeVideoId && (

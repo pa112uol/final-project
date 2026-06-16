@@ -225,7 +225,7 @@ export async function runPipeline(
   const preMMR =
     withTagMatch.length >= RECOMMENDATION_LIMIT ? withTagMatch : afterArtistCap;
   console.log(
-    `[pipeline:tagfloor] ${afterArtistCap.length - withTagMatch.length} tracks with no seed tag match — ` +
+    `[pipeline:tagfloor] ${afterArtistCap.length - withTagMatch.length} tracks with no seed tag match - ` +
       (preMMR === withTagMatch
         ? "excluded"
         : "kept (pool too small to filter)"),
@@ -266,4 +266,3 @@ export async function runPipeline(
     ),
   );
 }
-

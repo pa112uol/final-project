@@ -100,6 +100,31 @@ def search(request):
     return JsonResponse({"results": results})
 
 
+_coverart_cache: dict = {}
+
+
+@require_GET
+def coverart(request):
+    mbid = (request.GET.get("mbid") or "").strip()
+    if not mbid:
+        return JsonResponse({"error": "mbid required"}, status=400)
+
+    if mbid in _coverart_cache:
+        url = _coverart_cache[mbid]
+        if not url:
+            return JsonResponse({"error": "No cover art found"}, status=404)
+        return JsonResponse({"url": url})
+
+    from clients.coverart import fetch_cover_art_url
+
+    url = _run_async(fetch_cover_art_url(mbid))
+    if url:
+        _coverart_cache[mbid] = url
+    if not url:
+        return JsonResponse({"error": "No cover art found"}, status=404)
+    return JsonResponse({"url": url})
+
+
 _tracks_cache = None
 _tracks_cache_expires = 0
 

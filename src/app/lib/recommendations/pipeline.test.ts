@@ -304,20 +304,42 @@ describe("runPipeline", () => {
                 tags: ["jazz", "classical"],
               }))
             : [
-                { mbid: `${mbid}-a`, title: `Sg Track A by ${mbid}`, artistMbid: mbid, durationMs: null, listenCount: 1000, userCount: 500, tags: ["shoegaze"] },
-                { mbid: `${mbid}-b`, title: `Sg Track B by ${mbid}`, artistMbid: mbid, durationMs: null, listenCount: 800, userCount: 400, tags: ["shoegaze"] },
+                {
+                  mbid: `${mbid}-a`,
+                  title: `Sg Track A by ${mbid}`,
+                  artistMbid: mbid,
+                  durationMs: null,
+                  listenCount: 1000,
+                  userCount: 500,
+                  tags: ["shoegaze"],
+                },
+                {
+                  mbid: `${mbid}-b`,
+                  title: `Sg Track B by ${mbid}`,
+                  artistMbid: mbid,
+                  durationMs: null,
+                  listenCount: 800,
+                  userCount: 400,
+                  tags: ["shoegaze"],
+                },
               ],
         ),
       ),
     });
-    const tracks = await runPipeline([TEST_SEED], "fake-api-key", undefined, 0, clients);
+    const tracks = await runPipeline(
+      [TEST_SEED],
+      "fake-api-key",
+      undefined,
+      0,
+      clients,
+    );
     const titles = tracks.map((t) => t.title);
     expect(titles.some((t) => t.startsWith("Wrong Genre"))).toBe(false);
     expect(titles.some((t) => t.startsWith("Sg "))).toBe(true);
   });
 
   it("keeps zero-tag-score tracks when filtering would leave fewer than the recommendation limit", async () => {
-    // 3 distinct artists with non-matching tags — pool stays below RECOMMENDATION_LIMIT (10)
+    // 3 distinct artists with non-matching tags - pool stays below RECOMMENDATION_LIMIT (10)
     const clients = makeClients({
       fetchTagArtists: vi.fn().mockResolvedValue([
         { name: "Band A", mbid: "mbid-band-a" },
@@ -325,20 +347,27 @@ describe("runPipeline", () => {
         { name: "Band C", mbid: "mbid-band-c" },
       ]),
       fetchArtistTopRecordings: vi.fn().mockImplementation((mbid) =>
-        Promise.resolve([{
-          mbid: `${mbid}-track`,
-          title: `Track by ${mbid}`,
-          artistMbid: mbid,
-          durationMs: null,
-          listenCount: 500,
-          userCount: 200,
-          tags: ["jazz"],
-        }]),
+        Promise.resolve([
+          {
+            mbid: `${mbid}-track`,
+            title: `Track by ${mbid}`,
+            artistMbid: mbid,
+            durationMs: null,
+            listenCount: 500,
+            userCount: 200,
+            tags: ["jazz"],
+          },
+        ]),
       ),
     });
-    const tracks = await runPipeline([TEST_SEED], "fake-api-key", undefined, 0, clients);
-    // Pool too small to filter — all 3 tracks survive
+    const tracks = await runPipeline(
+      [TEST_SEED],
+      "fake-api-key",
+      undefined,
+      0,
+      clients,
+    );
+    // Pool too small to filter - all 3 tracks survive
     expect(tracks.length).toBe(3);
   });
 });
-

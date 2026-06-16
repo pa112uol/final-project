@@ -10,15 +10,15 @@ concurrently and the time reflects the wall-clock total for the batch.
 
 ## Results
 
-| Scenario | Seed | Calls | Python | Next.js | Ratio |
-|---|---|---|---|---|---|
-| A — Synth-pop | "Blinding Lights" — The Weeknd | 1 | 7.44s | 4.51s | 1.65x |
-| B — Hip-hop | "HUMBLE." — Kendrick Lamar | 1 | 8.37s | 5.57s | 1.50x |
-| C — Classic rock | "Stairway to Heaven" — Led Zeppelin | 1 | 7.35s | 3.62s | 2.03x |
-| D — Ultra-niche | "Alien Observer" — Grouper | 1 | 8.11s | 2.94s | 2.76x |
-| E — Multi-seed | The National + Bon Iver | 3 parallel | 10.19s | 5.86s | 1.74x |
-| F — Novelty gradient | "Teardrop" — Massive Attack | 3 parallel | 20.00s | 13.10s | 1.53x |
-| **Total** | | | **~61s** | **~36s** | **~1.70x** |
+| Scenario             | Seed                                | Calls      | Python   | Next.js  | Ratio      |
+| -------------------- | ----------------------------------- | ---------- | -------- | -------- | ---------- |
+| A - Synth-pop        | "Blinding Lights" - The Weeknd      | 1          | 7.44s    | 4.51s    | 1.65x      |
+| B - Hip-hop          | "HUMBLE." - Kendrick Lamar          | 1          | 8.37s    | 5.57s    | 1.50x      |
+| C - Classic rock     | "Stairway to Heaven" - Led Zeppelin | 1          | 7.35s    | 3.62s    | 2.03x      |
+| D - Ultra-niche      | "Alien Observer" - Grouper          | 1          | 8.11s    | 2.94s    | 2.76x      |
+| E - Multi-seed       | The National + Bon Iver             | 3 parallel | 10.19s   | 5.86s    | 1.74x      |
+| F - Novelty gradient | "Teardrop" - Massive Attack         | 3 parallel | 20.00s   | 13.10s   | 1.53x      |
+| **Total**            |                                     |            | **~61s** | **~36s** | **~1.70x** |
 
 All 27 assertions passed in both suites.
 
@@ -49,7 +49,7 @@ overhead each time.
 **HTTP client throughput.** `httpx.AsyncClient` is a robust async HTTP client
 but carries more per-request overhead than Node's built-in `fetch`. In the
 parallel scenarios (E, F) where three pipelines run concurrently, this overhead
-multiplies — Python's parallel batch takes 10-20s versus 6-13s for Node. The
+multiplies - Python's parallel batch takes 10-20s versus 6-13s for Node. The
 gap is widest in scenario D (ultra-niche), where the niche seed triggers more
 MusicBrainz rate-limit sleeps; Python serialises those sleeps one event loop at
 a time, while Node handles them more efficiently within a single loop.
