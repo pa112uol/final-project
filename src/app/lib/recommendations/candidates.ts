@@ -1,5 +1,9 @@
 import type { Candidate, PipelineClients } from "./types";
-import { ARTISTS_PER_TAG, TOP_ARTISTS_COUNT, TRACKS_PER_ARTIST } from "./constants";
+import {
+  ARTISTS_PER_TAG,
+  TOP_ARTISTS_COUNT,
+  TRACKS_PER_ARTIST,
+} from "./constants";
 
 const LB_CONCURRENCY = 5;
 
@@ -8,13 +12,19 @@ class Semaphore {
   private queue: Array<() => void> = [];
   constructor(private max: number) {}
   acquire(): Promise<void> {
-    if (this.running < this.max) { this.running++; return Promise.resolve(); }
+    if (this.running < this.max) {
+      this.running++;
+      return Promise.resolve();
+    }
     return new Promise<void>((resolve) => this.queue.push(resolve));
   }
   release(): void {
     this.running--;
     const next = this.queue.shift();
-    if (next) { this.running++; next(); }
+    if (next) {
+      this.running++;
+      next();
+    }
   }
 }
 
@@ -32,8 +42,8 @@ export async function buildCandidates(
   // At higher novelty fetch deeper pages of tag.getTopArtists so the long
   // tail of less popular artists enters the pool. Page 1 is always included
   // so relevant artists are never dropped at any novelty level.
-  const pagesToFetch = 1 + Math.round(novelty * 2); // 1–3 pages
-  const topArtistsCount = Math.round(TOP_ARTISTS_COUNT * (1 + novelty)); // 15–30
+  const pagesToFetch = 1 + Math.round(novelty * 2); // 1-3 pages
+  const topArtistsCount = Math.round(TOP_ARTISTS_COUNT * (1 + novelty)); // 15-30
 
   // Phase A: score artists by how many weighted tags they appear in
   const artistScores = new Map<
@@ -61,7 +71,8 @@ export async function buildCandidates(
               const rankDecay = 1 / Math.log2(rank + 2);
               const existing = artistScores.get(key);
               if (existing) {
-                if (!tagAlreadyCredited) existing.tagWeightSum += tagWeight * rankDecay;
+                if (!tagAlreadyCredited)
+                  existing.tagWeightSum += tagWeight * rankDecay;
                 if (!existing.mbid && artist.mbid) existing.mbid = artist.mbid;
               } else {
                 artistScores.set(key, {
@@ -92,9 +103,7 @@ export async function buildCandidates(
 
   console.log(
     "[candidates] top artists:",
-    topArtists
-      .map((a) => `${a.name}(${a.tagWeightSum.toFixed(0)})`)
-      .join(", "),
+    topArtists.map((a) => `${a.name}(${a.tagWeightSum.toFixed(0)})`).join(", "),
   );
 
   // Resolve missing artist MBIDs via MusicBrainz (serialised by mbFetch queue)
@@ -117,7 +126,9 @@ export async function buildCandidates(
     topArtists.map(async (artist) => {
       if (!artist.mbid) return;
       await lbSem.acquire();
-      let recordings: Awaited<ReturnType<typeof clients.fetchArtistTopRecordings>>;
+      let recordings: Awaited<
+        ReturnType<typeof clients.fetchArtistTopRecordings>
+      >;
       try {
         recordings = await clients.fetchArtistTopRecordings(
           artist.mbid,
@@ -126,7 +137,9 @@ export async function buildCandidates(
       } finally {
         lbSem.release();
       }
-      const matchedTags = [...(artistTags.get(artist.name.toLowerCase()) ?? [])];
+      const matchedTags = [
+        ...(artistTags.get(artist.name.toLowerCase()) ?? []),
+      ];
       for (const r of recordings) {
         const key = `${r.title.toLowerCase()}|||${artist.name.toLowerCase()}`;
         candidates.set(key, {

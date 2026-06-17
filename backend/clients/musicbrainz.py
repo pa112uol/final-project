@@ -1,5 +1,6 @@
 import re
 import logging
+from rapidfuzz import fuzz
 from .http import get_client
 
 MB_BASE = "https://musicbrainz.org/ws/2"
@@ -14,10 +15,22 @@ _NOISE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# "feat." / "ft." / "featuring" strip from track component before title matching
+# Strip feat./ft./featuring from the track component before title matching
 _FEAT_RE = re.compile(r"\s+(?:ft\.?|feat\.?|featuring)\s+.+$", re.IGNORECASE)
 
 _SPECIAL = re.compile(r'[+\-&|!(){}[\]^"~*?:\\/]')
+
+# Minimum blended confidence to keep a result (0-100)
+_THRESHOLD = 45
+
+# Blend weights: rf_score (rapidfuzz similarity), mb_score (Lucene relevance),
+# age_score (older = higher)
+_RF_WEIGHT = 0.50
+_MB_WEIGHT = 0.40
+_AGE_WEIGHT = 0.10
+
+# Normalisation base: 75 years (1950 => 100, 2025 => 0)
+_AGE_SPAN = 75
 
 
 def _escape_mb(s: str) -> str:
@@ -25,27 +38,19 @@ def _escape_mb(s: str) -> str:
 
 
 def _clean(q: str) -> str:
-    """Normalise raw user input before query building."""
     q = q.strip()
-    q = re.sub(r'^["\']|["\']$', "", q)   # strip outer quotes
-    q = _NOISE_RE.sub("", q)              # strip "(Official Video)" etc.
+    q = re.sub(r'^["\']|["\']$', "", q)
+    q = _NOISE_RE.sub("", q)
     q = re.sub(r"\s+", " ", q).strip()
     return q
 
 
 def _parse_artist_track(q: str):
-    """
-    Return (artist, track) when a separator is present, else (None, q).
-
-    Handles:
-      Artist - Track   (dash with spaces, most common)
-      Track by Artist  (greedy "by" so "By The Way by RHCP" parses correctly)
-    """
     dash = re.match(r"^(.+?)\s+-\s+(.+)$", q)
     if dash:
         return dash.group(1).strip(), dash.group(2).strip()
 
-    # Greedy first group: "By The Way by RHCP" → track="By The Way", artist="RHCP"
+    # Greedy first group: "By The Way by RHCP" -> track="By The Way", artist="RHCP"
     by_m = re.match(r"^(.+)\s+by\s+(.+)$", q, re.IGNORECASE)
     if by_m:
         return by_m.group(2).strip(), by_m.group(1).strip()
@@ -59,31 +64,47 @@ def _build_query(q: str) -> str:
     if artist:
         a = _escape_mb(artist)
         t = _escape_mb(_FEAT_RE.sub("", track).strip())
-        parts = [
-            # Highest confidence: exact phrase, correct Artist - Track order
-            f'(recording:("{t}")^3 AND artist:("{a}")^2)',
-            # Token match, correct order
-            f'(recording:({t})^2 AND artist:({a}))',
-            # Reversed order fallback (user may have typed Track - Artist)
-            f'(recording:("{a}") AND artist:("{t}"))',
-        ]
+        return f'("{t}" AND artistname:"{a}") OR ("{a}" AND artistname:"{t}")'
     else:
         e = _escape_mb(_FEAT_RE.sub("", q).strip())
         words = e.split()
-        parts = [
-            # Cross-field: each field must match ≥1 token - works for "radiohead creep"
-            f'(recording:({e})^2 AND artist:({e}))',
-            # Phrase match for pure track names - works for "bohemian rhapsody"
-            f'recording:("{e}")^2',
-            # Token fallback for single-artist or partial name queries
-            f'recording:({e})',
-        ]
-        # Fuzzy for short queries (≤2 words) to handle common typos
-        if 1 <= len(words) <= 2:
-            fuzzy = " ".join(f"{w}~" for w in words)
-            parts.append(f'(recording:({fuzzy}) AND artist:({fuzzy}))')
+        fuzzy = " ".join(f"{w}~" for w in words)
+        if len(words) == 1:
+            # Single-word queries use the artist-only branch to surface songs,
+            # not self-titled recordings
+            return f'(+artistname:"{e}" -recording:({fuzzy}))'
+        return (
+            f'(recording:({fuzzy}) AND artistname:({fuzzy})) OR '
+            f'recording:("{e}") OR '
+            f'recording:({fuzzy}) OR '
+            f'artistname:({fuzzy})'
+        )
 
-    return " OR ".join(parts)
+
+def _rapidfuzz_score(query: str, query_artist: str | None, query_track: str,
+                     result_title: str, result_artist: str) -> float:
+    t_score = fuzz.token_sort_ratio(query_track.lower(), result_title.lower())
+
+    if query_artist:
+        a_score = fuzz.token_sort_ratio(query_artist.lower(), result_artist.lower())
+        return (t_score + a_score) / 2
+
+    # For plain queries, score against title, combined title+artist, and artist (0.75x penalty) and take the max
+    combined = f"{result_title} {result_artist}".lower()
+    combined_score = fuzz.token_sort_ratio(query.lower(), combined)
+    a_score = fuzz.token_sort_ratio(query.lower(), result_artist.lower()) * 0.75
+    return max(t_score, combined_score, a_score)
+
+
+def _age_score(first_release_date: str) -> float:
+    # Older recordings score higher (0-100). Missing dates return neutral 50
+    if not first_release_date:
+        return 50.0
+    try:
+        year = int(first_release_date[:4])
+        return max(0.0, min(100.0, (2025 - year) / _AGE_SPAN * 100))
+    except (ValueError, IndexError):
+        return 50.0
 
 
 async def search_tracks(q: str) -> list:
@@ -94,10 +115,14 @@ async def search_tracks(q: str) -> list:
     query = _build_query(q)
     logger.debug("MB search query: %s", query)
 
+    # Single-word artist queries need 50 results because proper songs are outranked by self-titled recordings
+    is_single_word = len(q.split()) == 1
+    limit = "50" if is_single_word else "20"
+
     try:
         res = await get_client("mb-search", timeout=10).get(
             f"{MB_BASE}/recording",
-            params={"query": query, "limit": "20", "fmt": "json"},
+            params={"query": query, "limit": limit, "fmt": "json"},
         )
         if not res.is_success:
             logger.warning("MB search HTTP %s", res.status_code)
@@ -106,6 +131,8 @@ async def search_tracks(q: str) -> list:
     except Exception:
         logger.exception("MB search failed")
         return []
+
+    query_artist, query_track = _parse_artist_track(q)
 
     seen_mbid: set[str] = set()
     seen_key: set[str] = set()
@@ -123,17 +150,33 @@ async def search_tracks(q: str) -> list:
             continue
         seen_mbid.add(mbid)
         seen_key.add(key)
+
+        rf_score = _rapidfuzz_score(q, query_artist, query_track, r["title"], artist)
+        mb_score = float(r.get("score") or 0)
+        age = _age_score(r.get("first-release-date", ""))
+        score = rf_score * _RF_WEIGHT + mb_score * _MB_WEIGHT + age * _AGE_WEIGHT
+
+        # Penalise recordings where the band name is embedded in a longer title (interviews, remixes)
+        q_words = len(q.split())
+        title_words = len(r["title"].split())
+        if (not query_artist
+                and fuzz.token_sort_ratio(q.lower(), artist.lower()) > 80
+                and q.lower() in r["title"].lower()
+                and title_words >= q_words + 1):
+            score *= 0.75
+
+        if score < _THRESHOLD:
+            continue
+
         results.append({
             "mbid": mbid,
             "title": r["title"],
             "artist": artist,
-            "score": int(r.get("score", 0)),
+            "score": score,
         })
-        if len(results) == 10:
-            break
 
     results.sort(key=lambda x: x["score"], reverse=True)
-    return results
+    return results[:10]
 
 
 async def resolve_canonical_mbid(mbid: str) -> str:

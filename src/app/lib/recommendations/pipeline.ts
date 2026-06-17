@@ -55,7 +55,7 @@ export async function runPipeline(
 
   const mergedSummary = seedTagSets.map(
     (tags, i) =>
-      `  seed[${i}] (${seeds[i].title} – ${seeds[i].artist}): ${tags.map((t) => `${t.name}(${t.count})`).join(", ") || "(none)"}`,
+      `  seed[${i}] (${seeds[i].title} - ${seeds[i].artist}): ${tags.map((t) => `${t.name}(${t.count})`).join(", ") || "(none)"}`,
   );
   console.log("[tags/merged]\n" + mergedSummary.join("\n"));
 
@@ -240,7 +240,7 @@ export async function runPipeline(
       top
         .map(
           (c, i) =>
-            `  [${i + 1}] "${c.title}" – ${c.artist}` +
+            `  [${i + 1}] "${c.title}" - ${c.artist}` +
             `\n       mbid:${c.mbid || "none"}` +
             `\n       listens:${c.listenCount} users:${c.userCount} artistListens:${c.artistListenCount}` +
             `\n       relevance:${c.relevanceScore.toFixed(3)} novelty:${c.noveltyScore.toFixed(3)} final:${c.finalScore.toFixed(3)}` +

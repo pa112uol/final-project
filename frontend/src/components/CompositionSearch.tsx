@@ -39,7 +39,9 @@ export default function CompositionSearch({
       setOpen(false);
       setLoading(false);
       setActiveIndex(-1);
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
 
     setLoading(true);
@@ -92,7 +94,9 @@ export default function CompositionSearch({
   // Scroll active item into view
   useEffect(() => {
     if (activeIndex < 0 || !listRef.current) return;
-    const item = listRef.current.children[activeIndex] as HTMLElement | undefined;
+    const item = listRef.current.children[activeIndex] as
+      | HTMLElement
+      | undefined;
     item?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
@@ -168,7 +172,7 @@ export default function CompositionSearch({
             onFocus={() => {
               if (results.length > 0) setOpen(true);
             }}
-            placeholder="Search for a track or artist – track..."
+            placeholder="Search for a track or artist - track..."
             autoComplete="off"
             spellCheck={false}
             className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 pr-10 outline-none focus:ring-2 focus:ring-indigo-500"
@@ -266,7 +270,9 @@ export default function CompositionSearch({
             >
               <span className="font-medium">{c.title}</span>
               {c.artist && (
-                <span className="text-indigo-300 font-normal">· {c.artist}</span>
+                <span className="text-indigo-300 font-normal">
+                  · {c.artist}
+                </span>
               )}
               <button
                 onClick={() => removeChip(c.mbid)}

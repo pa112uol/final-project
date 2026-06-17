@@ -27,7 +27,9 @@ const RECORDING_B = {
   tags: [],
 };
 
-function makeClients(overrides: Partial<CandidateClients> = {}): CandidateClients {
+function makeClients(
+  overrides: Partial<CandidateClients> = {},
+): CandidateClients {
   return {
     fetchTagArtists: vi
       .fn()
@@ -68,8 +70,8 @@ describe("buildCandidates", () => {
   it("uses recording tags when present, artist tags as fallback", async () => {
     const clients = makeClients({
       fetchArtistTopRecordings: vi.fn().mockResolvedValue([
-        RECORDING_A,  // has tags: ["shoegaze"]
-        RECORDING_B,  // has tags: [] → should fall back to matched artist tags
+        RECORDING_A, // has tags: ["shoegaze"]
+        RECORDING_B, // has tags: [] => should fall back to matched artist tags
       ]),
     });
     const result = await buildCandidates(TOP_TAGS, "key", 0, clients);
@@ -89,7 +91,7 @@ describe("buildCandidates", () => {
     expect(pages).toEqual([1]);
   });
 
-  it("at novelty=1, fetches pages 1–3 per tag", async () => {
+  it("at novelty=1, fetches pages 1-3 per tag", async () => {
     const fetchTagArtists = vi
       .fn()
       .mockResolvedValue([{ name: "Slowdive", mbid: "artist-mbid-1" }]);
@@ -104,14 +106,14 @@ describe("buildCandidates", () => {
       ["dreampop", 80],
     ];
     const clients = makeClients({
-      fetchTagArtists: vi.fn().mockImplementation((tag) =>
-        Promise.resolve([
-          { name: "Slowdive", mbid: "artist-mbid-1" },
-        ])
-      ),
+      fetchTagArtists: vi
+        .fn()
+        .mockImplementation((tag) =>
+          Promise.resolve([{ name: "Slowdive", mbid: "artist-mbid-1" }]),
+        ),
     });
     const result = await buildCandidates(tags, "key", 0, clients);
-    // Slowdive appears in both tags → tagWeightSum = 100 + 80 = 180
+    // Slowdive appears in both tags => tagWeightSum = 100 + 80 = 180
     expect(result[0].tagWeightSum).toBe(180);
   });
 
@@ -121,7 +123,12 @@ describe("buildCandidates", () => {
       .fn()
       // Same artist on both page 1 and page 2
       .mockResolvedValue([{ name: "Slowdive", mbid: "artist-mbid-1" }]);
-    const result = await buildCandidates(tags, "key", 0.5, makeClients({ fetchTagArtists }));
+    const result = await buildCandidates(
+      tags,
+      "key",
+      0.5,
+      makeClients({ fetchTagArtists }),
+    );
     // tagWeightSum should be 100, not 200, even if novelty causes 2 pages
     expect(result[0].tagWeightSum).toBe(100);
   });
@@ -141,7 +148,12 @@ describe("buildCandidates", () => {
 
   it("does not call resolveArtistMbid when MBID is already present", async () => {
     const resolveArtistMbid = vi.fn();
-    await buildCandidates(TOP_TAGS, "key", 0, makeClients({ resolveArtistMbid }));
+    await buildCandidates(
+      TOP_TAGS,
+      "key",
+      0,
+      makeClients({ resolveArtistMbid }),
+    );
     expect(resolveArtistMbid).not.toHaveBeenCalled();
   });
 
@@ -165,9 +177,9 @@ describe("buildCandidates", () => {
     const clients = makeClients({
       fetchTagArtists: vi.fn().mockRejectedValue(new Error("API down")),
     });
-    await expect(
-      buildCandidates(TOP_TAGS, "key", 0, clients),
-    ).resolves.toEqual([]);
+    await expect(buildCandidates(TOP_TAGS, "key", 0, clients)).resolves.toEqual(
+      [],
+    );
   });
 
   it("selects artists with highest tagWeightSum when list exceeds topArtistsCount", async () => {
@@ -185,9 +197,7 @@ describe("buildCandidates", () => {
       // "shoegaze" returns all 20; only this tag so all artists have equal weight
       Promise.resolve(manyArtists),
     );
-    const fetchArtistTopRecordings = vi
-      .fn()
-      .mockResolvedValue([RECORDING_A]);
+    const fetchArtistTopRecordings = vi.fn().mockResolvedValue([RECORDING_A]);
 
     const result = await buildCandidates(
       tags,
@@ -200,17 +210,20 @@ describe("buildCandidates", () => {
   });
 
   it("applies rank decay so artists ranked first receive more credit than lower-ranked ones", async () => {
-    const fetchTagArtists = vi
-      .fn()
-      .mockResolvedValue([
-        { name: "Slowdive", mbid: "mbid-1" },
-        { name: "Ride", mbid: "mbid-2" },
-      ]);
+    const fetchTagArtists = vi.fn().mockResolvedValue([
+      { name: "Slowdive", mbid: "mbid-1" },
+      { name: "Ride", mbid: "mbid-2" },
+    ]);
     const fetchArtistTopRecordings = vi.fn().mockImplementation((mbid) =>
       Promise.resolve([
         mbid === "mbid-1"
           ? { ...RECORDING_A, mbid: "rec-1", artistMbid: "mbid-1" }
-          : { ...RECORDING_A, mbid: "rec-2", artistMbid: "mbid-2", title: "Track B" },
+          : {
+              ...RECORDING_A,
+              mbid: "rec-2",
+              artistMbid: "mbid-2",
+              title: "Track B",
+            },
       ]),
     );
     const result = await buildCandidates(
@@ -228,7 +241,9 @@ describe("buildCandidates", () => {
   it("deduplicates recordings by title+artist key", async () => {
     const duplicate = { ...RECORDING_A, mbid: "rec-a-dup" };
     const clients = makeClients({
-      fetchArtistTopRecordings: vi.fn().mockResolvedValue([RECORDING_A, duplicate]),
+      fetchArtistTopRecordings: vi
+        .fn()
+        .mockResolvedValue([RECORDING_A, duplicate]),
     });
     const result = await buildCandidates(TOP_TAGS, "key", 0, clients);
     const trackATitles = result.filter((c) => c.title === "Track A");
@@ -247,7 +262,7 @@ describe("buildCandidates", () => {
     const fetchArtistTopRecordings = vi.fn().mockImplementation(() => {
       inFlight++;
       peak = Math.max(peak, inFlight);
-      return new Promise<typeof RECORDING_A[]>((resolve) =>
+      return new Promise<(typeof RECORDING_A)[]>((resolve) =>
         setTimeout(() => {
           inFlight--;
           resolve([{ ...RECORDING_A, artistMbid: "mbid-x" }]);

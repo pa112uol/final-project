@@ -74,7 +74,7 @@ function assertSeedExcluded(
 
 function printResults(label: string, tracks: Track[]) {
   console.log(`\n${"─".repeat(60)}`);
-  console.log(`[ANALYSIS] ${label} → ${tracks.length} tracks returned`);
+  console.log(`[ANALYSIS] ${label} => ${tracks.length} tracks returned`);
   for (let i = 0; i < tracks.length; i++) {
     const t = tracks[i];
     console.log(
@@ -262,7 +262,7 @@ describe("Integration - Scenario 4: Novelty comparison (novelty=0 vs novelty=1)"
     const avgNovelty0 = avg(tracksLowNovelty);
     const avgNovelty1 = avg(tracksHighNovelty);
     console.log(
-      `[ANALYSIS] avg noveltyScore: novelty=0 → ${avgNovelty0.toFixed(3)}, novelty=1 → ${avgNovelty1.toFixed(3)}`,
+      `[ANALYSIS] avg noveltyScore: novelty=0 => ${avgNovelty0.toFixed(3)}, novelty=1 => ${avgNovelty1.toFixed(3)}`,
     );
     expect(avgNovelty1).toBeGreaterThanOrEqual(avgNovelty0);
   });
@@ -279,7 +279,7 @@ describe("Integration - Scenario 4: Novelty comparison (novelty=0 vs novelty=1)"
     const avgRel0 = avg(tracksLowNovelty);
     const avgRel1 = avg(tracksHighNovelty);
     console.log(
-      `[ANALYSIS] avg relevanceScore: novelty=0 → ${avgRel0.toFixed(3)}, novelty=1 → ${avgRel1.toFixed(3)}`,
+      `[ANALYSIS] avg relevanceScore: novelty=0 => ${avgRel0.toFixed(3)}, novelty=1 => ${avgRel1.toFixed(3)}`,
     );
     // Not a strict invariant (same pool, different weighting), but generally holds
     expect(avgRel0).toBeGreaterThanOrEqual(0);
@@ -363,4 +363,3 @@ describe("Integration - Scenario 5: Multi-seed (two seeds, consensus tag boostin
     expect(tracksMulti.length).toBeGreaterThan(0);
   });
 });
-

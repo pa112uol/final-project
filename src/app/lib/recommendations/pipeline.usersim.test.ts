@@ -115,7 +115,7 @@ function printQuality(report: QualityReport, tracks: Track[]) {
   for (let i = 0; i < tracks.length; i++) {
     const t = tracks[i];
     console.log(
-      `[${i + 1}] "${t.title}" – ${t.artist}` +
+      `[${i + 1}] "${t.title}" - ${t.artist}` +
         `rel:${t.relevanceScore.toFixed(3)} nov:${t.noveltyScore.toFixed(3)}`,
     );
   }
@@ -143,7 +143,7 @@ function assertArtistCap(tracks: Track[]) {
     expect(n, `${a} exceeded cap`).toBeLessThanOrEqual(2);
 }
 
-describe("UserSim A – Mainstream synth-pop: 'Blinding Lights' – The Weeknd", () => {
+describe("UserSim A - Mainstream synth-pop: 'Blinding Lights' - The Weeknd", () => {
   let tracks: Track[];
   let report: QualityReport;
 
@@ -156,7 +156,9 @@ describe("UserSim A – Mainstream synth-pop: 'Blinding Lights' – The Weeknd",
       undefined,
       0,
     );
-    console.log(`\n[TIME] UserSim A (synth-pop): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
+    console.log(
+      `\n[TIME] UserSim A (synth-pop): ${((Date.now() - t0) / 1000).toFixed(2)}s`,
+    );
     report = analyseQuality("Synth-pop (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -187,7 +189,7 @@ describe("UserSim A – Mainstream synth-pop: 'Blinding Lights' – The Weeknd",
   });
 });
 
-describe("UserSim B – Hip-hop: 'HUMBLE.' – Kendrick Lamar", () => {
+describe("UserSim B - Hip-hop: 'HUMBLE.' - Kendrick Lamar", () => {
   let tracks: Track[];
   let report: QualityReport;
 
@@ -200,7 +202,9 @@ describe("UserSim B – Hip-hop: 'HUMBLE.' – Kendrick Lamar", () => {
       undefined,
       0,
     );
-    console.log(`\n[TIME] UserSim B (hip-hop): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
+    console.log(
+      `\n[TIME] UserSim B (hip-hop): ${((Date.now() - t0) / 1000).toFixed(2)}s`,
+    );
     report = analyseQuality("Hip-hop (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -233,7 +237,7 @@ describe("UserSim B – Hip-hop: 'HUMBLE.' – Kendrick Lamar", () => {
   });
 });
 
-describe("UserSim C – Classic rock: 'Stairway to Heaven' – Led Zeppelin", () => {
+describe("UserSim C - Classic rock: 'Stairway to Heaven' - Led Zeppelin", () => {
   let tracks: Track[];
   let report: QualityReport;
 
@@ -246,7 +250,9 @@ describe("UserSim C – Classic rock: 'Stairway to Heaven' – Led Zeppelin", ()
       undefined,
       0,
     );
-    console.log(`\n[TIME] UserSim C (classic rock): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
+    console.log(
+      `\n[TIME] UserSim C (classic rock): ${((Date.now() - t0) / 1000).toFixed(2)}s`,
+    );
     report = analyseQuality("Classic rock (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -269,7 +275,7 @@ describe("UserSim C – Classic rock: 'Stairway to Heaven' – Led Zeppelin", ()
   });
 });
 
-describe("UserSim D – Ultra-niche: 'Alien Observer' – Grouper", () => {
+describe("UserSim D - Ultra-niche: 'Alien Observer' - Grouper", () => {
   let tracks: Track[];
   let report: QualityReport;
 
@@ -282,7 +288,9 @@ describe("UserSim D – Ultra-niche: 'Alien Observer' – Grouper", () => {
       undefined,
       0,
     );
-    console.log(`\n[TIME] UserSim D (ultra-niche): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
+    console.log(
+      `\n[TIME] UserSim D (ultra-niche): ${((Date.now() - t0) / 1000).toFixed(2)}s`,
+    );
     report = analyseQuality("Ultra-niche Grouper (novelty=0)", tracks);
     printQuality(report, tracks);
   }, 120_000);
@@ -305,7 +313,7 @@ describe("UserSim D – Ultra-niche: 'Alien Observer' – Grouper", () => {
   });
 });
 
-describe("UserSim E – Multi-seed indie: The National + Bon Iver", () => {
+describe("UserSim E - Multi-seed indie: The National + Bon Iver", () => {
   let tracksNational: Track[];
   let tracksBonIver: Track[];
   let tracksMulti: Track[];
@@ -336,7 +344,9 @@ describe("UserSim E – Multi-seed indie: The National + Bon Iver", () => {
         0,
       ),
     ]);
-    console.log(`\n[TIME] UserSim E (multi-seed, 3x parallel): ${((Date.now() - t0) / 1000).toFixed(2)}s`);
+    console.log(
+      `\n[TIME] UserSim E (multi-seed, 3x parallel): ${((Date.now() - t0) / 1000).toFixed(2)}s`,
+    );
     const rN = analyseQuality("National only", tracksNational);
     const rB = analyseQuality("Bon Iver only", tracksBonIver);
     const rM = analyseQuality("National + Bon Iver multi-seed", tracksMulti);
@@ -412,7 +422,7 @@ describe("UserSim E – Multi-seed indie: The National + Bon Iver", () => {
   });
 });
 
-describe("UserSim F – Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' – Massive Attack", () => {
+describe("UserSim F - Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' - Massive Attack", () => {
   let t0: Track[];
   let t5: Track[];
   let t1: Track[];
@@ -426,13 +436,15 @@ describe("UserSim F – Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' – Massive 
       getRecommendations(seed, API_KEY, undefined, 0.5),
       getRecommendations(seed, API_KEY, undefined, 1),
     ]);
-    console.log(`\n[TIME] UserSim F (novelty gradient, 3x parallel): ${((Date.now() - tStart) / 1000).toFixed(2)}s`);
+    console.log(
+      `\n[TIME] UserSim F (novelty gradient, 3x parallel): ${((Date.now() - tStart) / 1000).toFixed(2)}s`,
+    );
 
     const avg = (arr: Track[], fn: (t: Track) => number) =>
       arr.length ? arr.reduce((s, t) => s + fn(t), 0) / arr.length : 0;
 
     console.log("\n" + "═".repeat(60));
-    console.log("[QUALITY] Novelty gradient – Massive Attack 'Teardrop'");
+    console.log("[QUALITY] Novelty gradient - Massive Attack 'Teardrop'");
     console.log(
       `  novelty=0.0: ${t0.length} tracks  avgRel:${avg(t0, (t) => t.relevanceScore).toFixed(3)}  avgNov:${avg(t0, (t) => t.noveltyScore).toFixed(3)}`,
     );
@@ -446,7 +458,7 @@ describe("UserSim F – Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' – Massive 
     const top3 = (arr: Track[]) =>
       arr
         .slice(0, 3)
-        .map((t) => `"${t.title}" – ${t.artist}`)
+        .map((t) => `"${t.title}" - ${t.artist}`)
         .join(" | ");
     console.log(`  top-3 (nov=0):   ${top3(t0)}`);
     console.log(`  top-3 (nov=0.5): ${top3(t5)}`);
@@ -468,7 +480,7 @@ describe("UserSim F – Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' – Massive 
       n5 = avg(t5),
       n1 = avg(t1);
     console.log(
-      `[QUALITY] avg novelty: nov=0 → ${n0.toFixed(3)}, nov=0.5 → ${n5.toFixed(3)}, nov=1 → ${n1.toFixed(3)}`,
+      `[QUALITY] avg novelty: nov=0 => ${n0.toFixed(3)}, nov=0.5 => ${n5.toFixed(3)}, nov=1 => ${n1.toFixed(3)}`,
     );
     expect(n5).toBeGreaterThanOrEqual(n0);
     expect(n1).toBeGreaterThanOrEqual(n5);
@@ -481,7 +493,7 @@ describe("UserSim F – Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' – Massive 
       r5 = avg(t5),
       r1 = avg(t1);
     console.log(
-      `[QUALITY] avg relevance: nov=0 → ${r0.toFixed(3)}, nov=0.5 → ${r5.toFixed(3)}, nov=1 → ${r1.toFixed(3)}`,
+      `[QUALITY] avg relevance: nov=0 => ${r0.toFixed(3)}, nov=0.5 => ${r5.toFixed(3)}, nov=1 => ${r1.toFixed(3)}`,
     );
     expect(r5).toBeLessThanOrEqual(r0 + 0.05); // may be slightly above due to pool differences
     expect(r1).toBeLessThanOrEqual(r5 + 0.05);
@@ -493,4 +505,3 @@ describe("UserSim F – Novelty gradient: 0 vs 0.5 vs 1, 'Teardrop' – Massive 
     if (t1?.length) assertArtistCap(t1);
   });
 });
-

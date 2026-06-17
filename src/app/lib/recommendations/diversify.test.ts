@@ -67,7 +67,7 @@ describe("jaccardSets", () => {
   });
 
   it("returns correct value for partial overlap", () => {
-    // intersection = {b}, union = {a,b,c,d} → 1/4 = 0.25
+    // intersection = {b}, union = {a,b,c,d} => 1/4 = 0.25
     const result = jaccardSets(new Set(["a", "b"]), new Set(["b", "c", "d"]));
     expect(result).toBeCloseTo(1 / 4);
   });
@@ -106,9 +106,21 @@ describe("mmrSelect", () => {
   it("penalizes candidates with similar tags to already-selected ones", () => {
     // "copy" has the same tags as "best" and should be deprioritized vs "diverse"
     const ranked = [
-      makeScoredCandidate({ mbid: "best", finalScore: 0.9, tags: ["shoegaze", "dreampop"] }),
-      makeScoredCandidate({ mbid: "copy", finalScore: 0.85, tags: ["shoegaze", "dreampop"] }),
-      makeScoredCandidate({ mbid: "diverse", finalScore: 0.8, tags: ["techno", "electronic"] }),
+      makeScoredCandidate({
+        mbid: "best",
+        finalScore: 0.9,
+        tags: ["shoegaze", "dreampop"],
+      }),
+      makeScoredCandidate({
+        mbid: "copy",
+        finalScore: 0.85,
+        tags: ["shoegaze", "dreampop"],
+      }),
+      makeScoredCandidate({
+        mbid: "diverse",
+        finalScore: 0.8,
+        tags: ["techno", "electronic"],
+      }),
     ];
     const result = mmrSelect(ranked, 2);
     expect(result[0].mbid).toBe("best");
