@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import CoverArt from "./CoverArt";
 
 interface SearchResult {
   type: "track";
@@ -266,8 +267,9 @@ export default function CompositionSearch({
           {chips.map((c) => (
             <span
               key={c.mbid}
-              className="inline-flex items-center gap-1 bg-indigo-700 text-white rounded-full px-3 py-1 text-sm"
+              className="inline-flex items-center gap-1.5 bg-indigo-700 text-white rounded-full pl-1 pr-3 py-1 text-sm"
             >
+              <CoverArt mbid={c.mbid} className="w-6 h-6 rounded-full" />
               <span className="font-medium">{c.title}</span>
               {c.artist && (
                 <span className="text-indigo-300 font-normal">
