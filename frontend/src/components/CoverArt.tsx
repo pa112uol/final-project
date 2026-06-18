@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface CoverArtProps {
   mbid: string;
@@ -12,6 +12,9 @@ export default function CoverArt({
   const [url, setUrl] = useState<string | null>(null);
   const [fetching, setFetching] = useState(true);
   const [imgReady, setImgReady] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  const handleLoad = useCallback(() => setImgReady(true), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,24 +35,28 @@ export default function CoverArt({
     };
   }, [mbid]);
 
+  // Handle images already in the browser cache
+  useEffect(() => {
+    if (url && imgRef.current?.complete) setImgReady(true);
+  }, [url]);
+
   const showSkeleton = fetching || (!!url && !imgReady);
   const showPlaceholder = !fetching && !url;
 
   return (
     <div className={`${className} relative flex-shrink-0 overflow-hidden`}>
-      {/* Skeleton overlay, shown while fetching URL or while image is loading */}
       {showSkeleton && (
-        <div className="absolute inset-0 bg-gray-700 animate-pulse" />
+        <div className="absolute inset-0 bg-border-default animate-pulse" />
       )}
 
-      {/* Music note, shown when no cover art found */}
       {showPlaceholder && (
-        <div className="absolute inset-0 bg-gray-700 flex items-center justify-center">
+        <div className="absolute inset-0 bg-border-default flex items-center justify-center">
           <svg
-            className="w-1/2 h-1/2 text-gray-500"
+            className="w-1/2 h-1/2 text-text-muted"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
+            aria-hidden="true"
           >
             <path
               strokeLinecap="round"
@@ -61,16 +68,14 @@ export default function CoverArt({
         </div>
       )}
 
-      {/* Image, always mounted once URL is set so onLoad/onError can fire */}
       {url && (
         <img
+          ref={imgRef}
           src={url}
           alt=""
           className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${imgReady ? "opacity-100" : "opacity-0"}`}
-          onLoad={() => setImgReady(true)}
-          onError={() => {
-            setUrl(null);
-          }}
+          onLoad={handleLoad}
+          onError={() => setUrl(null)}
         />
       )}
     </div>
