@@ -2,6 +2,7 @@ import asyncio
 import random
 import time
 import logging
+import threading
 from django.http import JsonResponse
 from django.conf import settings
 from django.views.decorators.http import require_GET
@@ -15,6 +16,7 @@ def _run_async(coro):
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(asyncio.run, coro)
                 return future.result()
@@ -26,10 +28,18 @@ def _run_async(coro):
 @require_GET
 def recommendations(request):
     start_ms = int(time.time() * 1000)
-    req_id = "".join(random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=5))
+    req_id = "".join(
+        random.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=5)
+    )
 
     def log(phase, data):
-        logger.info("[REC:%s %s +%dms] %s", phase, req_id, int(time.time() * 1000) - start_ms, data)
+        logger.info(
+            "[REC:%s %s +%dms] %s",
+            phase,
+            req_id,
+            int(time.time() * 1000) - start_ms,
+            data,
+        )
 
     api_key = settings.LASTFM_API_KEY
     if not api_key:
@@ -74,12 +84,22 @@ def recommendations(request):
     from recommendations.index import get_recommendations
 
     try:
-        tracks = _run_async(get_recommendations(seeds, api_key, mood_raw, novelty))
+        tracks = _run_async(
+            get_recommendations(seeds, api_key, mood_raw, novelty)
+        )
     except Exception as err:
         logger.error("[REC] pipeline error: %s", err, exc_info=True)
-        return JsonResponse({"error": "Failed to fetch recommendations"}, status=500)
+        return JsonResponse(
+            {"error": "Failed to fetch recommendations"}, status=500
+        )
 
-    log("result", {"tracksReturned": len(tracks), "totalMs": int(time.time() * 1000) - start_ms})
+    log(
+        "result",
+        {
+            "tracksReturned": len(tracks),
+            "totalMs": int(time.time() * 1000) - start_ms,
+        },
+    )
 
     return JsonResponse({"tracks": [t.to_dict() for t in tracks]})
 
@@ -94,7 +114,12 @@ def search(request):
 
     tracks = _run_async(search_tracks(q))
     results = [
-        {"type": "track", "mbid": t["mbid"], "label": t["title"], "sub": t["artist"]}
+        {
+            "type": "track",
+            "mbid": t["mbid"],
+            "label": t["title"],
+            "sub": t["artist"],
+        }
         for t in tracks
     ]
     return JsonResponse({"results": results})
@@ -125,48 +150,50 @@ def coverart(request):
     return JsonResponse({"url": url})
 
 
-_tracks_cache = None
-_tracks_cache_expires = 0
+RANDOM_MB_BASE = "https://musicbrainz.org/ws/2"
+RANDOM_RESPONSE_LIMIT = 5
+RANDOM_CACHE_TTL_S = 60
+
+random_cache: list[dict] | None = None
+random_cache_expires: float = 0.0
+random_cache_lock = threading.Lock()
 
 
-@require_GET
-def tracks(request):
-    global _tracks_cache, _tracks_cache_expires
+async def _build_random_pool() -> list[dict]:
+    from clients.mb import mb_fetch
 
-    MB_BASE = "https://musicbrainz.org/ws/2"
-    RESPONSE_LIMIT = 5
-    CACHE_TTL_S = 60
-
-    async def build_pool():
-        from clients.mb import mb_fetch
-
-        letter = random.choice("abcdefghijklmnopqrstuvwxyz")
-        offset = random.randint(0, 399)
-        url = (
-            f"{MB_BASE}/recording"
-            f"?query=recording:{letter}*"
-            f"&offset={offset}&limit=25"
-            f"&inc=artist-credits+releases&fmt=json"
+    letter = random.choice("abcdefghijklmnopqrstuvwxyz")
+    offset = random.randint(0, 399)
+    url = (
+        f"{RANDOM_MB_BASE}/recording"
+        f"?query=recording:{letter}*"
+        f"&offset={offset}&limit=25"
+        f"&inc=artist-credits+releases&fmt=json"
+    )
+    res = await mb_fetch(url)
+    if not res.is_success:
+        raise ValueError(f"MusicBrainz responded with {res.status_code}")
+    recordings = res.json().get("recordings", [])
+    pool = []
+    for r in recordings:
+        credits = r.get("artist-credit") or []
+        credit = credits[0] if credits else None
+        artist = (
+            credit.get("name")
+            or (credit.get("artist") or {}).get("name")
+            or "Unknown"
+            if credit
+            else "Unknown"
         )
-        res = await mb_fetch(url)
-        if not res.is_success:
-            raise ValueError(f"MusicBrainz responded with {res.status_code}")
-        data = res.json()
-        recordings = data.get("recordings", [])
-        pool = []
-        for r in recordings:
-            credits = r.get("artist-credit") or []
-            credit = credits[0] if credits else None
-            artist = (
-                credit.get("name") or (credit.get("artist") or {}).get("name") or "Unknown"
-                if credit else "Unknown"
-            )
-            artist_mbid = (credit.get("artist") or {}).get("id", "") if credit else ""
-            releases = [
-                {"mbid": rel["id"], "title": rel["title"], "date": rel.get("date")}
-                for rel in (r.get("releases") or [])
-            ]
-            pool.append({
+        artist_mbid = (
+            (credit.get("artist") or {}).get("id", "") if credit else ""
+        )
+        releases = [
+            {"mbid": rel["id"], "title": rel["title"], "date": rel.get("date")}
+            for rel in (r.get("releases") or [])
+        ]
+        pool.append(
+            {
                 "mbid": r["id"],
                 "title": r["title"],
                 "artist": artist,
@@ -174,37 +201,57 @@ def tracks(request):
                 "durationMs": r.get("length"),
                 "firstReleaseDate": r.get("first-release-date"),
                 "releases": releases,
-            })
-        return pool
+            }
+        )
+    return pool
 
-    now = time.time()
-    if _tracks_cache is None or now > _tracks_cache_expires:
-        try:
-            pool = _run_async(build_pool())
-            _tracks_cache = pool
-            _tracks_cache_expires = now + CACHE_TTL_S
-        except Exception:
-            return JsonResponse(
-                {"error": "Failed to fetch tracks from MusicBrainz"}, status=502
-            )
 
-    selected = random.sample(
-        _tracks_cache, min(RESPONSE_LIMIT, len(_tracks_cache))
-    )
-
+async def _enrich_track(track: dict) -> dict:
     from clients.streaming import get_streaming_links
 
-    async def enrich(track):
-        streaming = await get_streaming_links(track["artist"], track["title"])
-        return {
-            **track,
-            "streaming": {
-                "appleMusic": streaming.apple_music,
-                "preview": streaming.preview,
-                "youtubeVideoId": streaming.youtube_video_id,
-                "spotify": streaming.spotify,
-            },
-        }
+    streaming = await get_streaming_links(track["artist"], track["title"])
+    return {
+        **track,
+        "streaming": {
+            "appleMusic": streaming.apple_music,
+            "preview": streaming.preview,
+            "youtubeVideoId": streaming.youtube_video_id,
+            "spotify": streaming.spotify,
+        },
+    }
 
-    enriched = _run_async(asyncio.gather(*[enrich(t) for t in selected]))
+
+@require_GET
+def random_tracks(request):
+    global random_cache, random_cache_expires
+
+    now = time.time()
+    if random_cache is None or now > random_cache_expires:
+        with random_cache_lock:
+            if random_cache is None or now > random_cache_expires:
+                try:
+                    pool = _run_async(_build_random_pool())
+                    random_cache = pool
+                    random_cache_expires = now + RANDOM_CACHE_TTL_S
+                except Exception:
+                    logger.error(
+                        "Failed to refresh random pool from MusicBrainz",
+                        exc_info=True,
+                    )
+                    if random_cache is None:
+                        return JsonResponse(
+                            {
+                                "error": "Failed to fetch tracks from MusicBrainz"
+                            },
+                            status=502,
+                        )
+
+    selected = random.sample(
+        random_cache, min(RANDOM_RESPONSE_LIMIT, len(random_cache))
+    )
+
+    async def _enrich_all():
+        return list(await asyncio.gather(*[_enrich_track(t) for t in selected]))
+
+    enriched = _run_async(_enrich_all())
     return JsonResponse({"tracks": list(enriched)})
