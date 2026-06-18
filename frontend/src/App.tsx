@@ -1,4 +1,5 @@
-import { Routes, Route, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import CompositionSearch from "./components/CompositionSearch";
 import TracksListWrapper from "./components/TracksListWrapper";
@@ -23,9 +24,9 @@ function SearchPage() {
   }
 
   return (
-    <div className="rounded-2xl bg-gray-900 p-8 shadow-xl">
-      <h1 className="text-3xl font-bold mb-2">NextTrack</h1>
-      <p className="text-gray-400 mb-8">
+    <div className="rounded-2xl bg-bg-surface p-8 shadow-xl">
+      <h1 className="text-3xl font-bold mb-2 text-text-primary">NextTrack</h1>
+      <p className="text-text-secondary mb-8">
         Search for a track to discover similar music.
       </p>
       <CompositionSearch onDiscover={handleDiscover} />
@@ -35,7 +36,7 @@ function SearchPage() {
 
 export default function App() {
   return (
-    <div className="min-h-screen bg-gray-950 text-white">
+    <div className="min-h-screen bg-bg-base text-text-primary">
       <Navbar />
       <main className="max-w-3xl mx-auto px-4 py-12">
         <Routes>

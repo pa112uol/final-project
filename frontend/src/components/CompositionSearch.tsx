@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import CoverArt from "./CoverArt";
+import { FOCUS_RING } from "../lib/styles";
 
 interface SearchResult {
   type: "track";
@@ -18,6 +19,7 @@ interface CompositionSearchProps {
   onDiscover: (seeds: Seed[]) => void;
 }
 
+
 export default function CompositionSearch({
   onDiscover,
 }: CompositionSearchProps) {
@@ -33,19 +35,9 @@ export default function CompositionSearch({
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!query.trim()) return;
+
     let cancelled = false;
-
-    if (!query.trim()) {
-      setResults([]);
-      setOpen(false);
-      setLoading(false);
-      setActiveIndex(-1);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setLoading(true);
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search/?q=${encodeURIComponent(query)}`);
@@ -168,7 +160,18 @@ export default function CompositionSearch({
             ref={inputRef}
             type="text"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              const val = e.target.value;
+              setQuery(val);
+              if (!val.trim()) {
+                setResults([]);
+                setOpen(false);
+                setLoading(false);
+                setActiveIndex(-1);
+              } else {
+                setLoading(true);
+              }
+            }}
             onKeyDown={handleKeyDown}
             onFocus={() => {
               if (results.length > 0) setOpen(true);
@@ -176,15 +179,16 @@ export default function CompositionSearch({
             placeholder="Search for a track or artist - track..."
             autoComplete="off"
             spellCheck={false}
-            className="w-full bg-gray-800 text-white rounded-lg px-4 py-3 pr-10 outline-none focus:ring-2 focus:ring-indigo-500"
+            className={`w-full bg-bg-surface text-text-primary rounded-lg px-4 py-3 pr-10 outline-none border border-border-default ${FOCUS_RING}`}
           />
           {loading && (
             <span className="absolute right-3 top-1/2 -translate-y-1/2">
               <svg
-                className="animate-spin h-4 w-4 text-indigo-400"
+                className="animate-spin h-4 w-4 text-blue"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
+                aria-hidden="true"
               >
                 <circle
                   className="opacity-25"
@@ -205,7 +209,7 @@ export default function CompositionSearch({
           {!loading && query && (
             <button
               onClick={clearQuery}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+              className={`absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary transition-colors rounded ${FOCUS_RING}`}
               tabIndex={-1}
               aria-label="Clear search"
             >
@@ -217,12 +221,13 @@ export default function CompositionSearch({
         {showDropdown && (
           <ul
             ref={listRef}
-            className="absolute z-10 w-full bg-gray-800 rounded-lg mt-1 shadow-xl max-h-64 overflow-y-auto"
+            className="absolute z-10 w-full bg-bg-surface border border-border-default rounded-lg mt-1 shadow-xl max-h-64 overflow-y-auto"
             role="listbox"
           >
             {results.length === 0 ? (
-              <li className="px-4 py-3 text-gray-500 text-sm">
-                No results for "{query}"
+              <li className="px-4 py-3 text-text-muted text-sm flex items-center gap-2">
+                <span className="text-red" aria-hidden="true">⚠</span>
+                <span>No results for &ldquo;{query}&rdquo;</span>
               </li>
             ) : (
               results.map((r, i) => {
@@ -236,21 +241,21 @@ export default function CompositionSearch({
                         addChip(r);
                       }}
                       onMouseEnter={() => setActiveIndex(i)}
-                      className={`w-full text-left px-4 py-2.5 transition-colors flex items-center justify-between gap-2 ${
-                        isActive ? "bg-indigo-700" : "hover:bg-gray-700"
+                      className={`w-full text-left px-4 py-2.5 transition-colors flex items-center justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue ${
+                        isActive ? "bg-bg-raised" : "hover:bg-bg-raised"
                       }`}
                     >
                       <span className="flex flex-col min-w-0">
-                        <span className="font-medium truncate">{r.label}</span>
+                        <span className="font-medium truncate text-text-primary">{r.label}</span>
                         {r.sub && (
-                          <span className="text-gray-400 text-sm truncate">
+                          <span className="text-text-secondary text-sm truncate">
                             {r.sub}
                           </span>
                         )}
                       </span>
                       {isAdded && (
-                        <span className="shrink-0 text-xs text-indigo-300">
-                          added
+                        <span className="shrink-0 text-xs text-amber font-semibold">
+                          ✓ added
                         </span>
                       )}
                     </button>
@@ -267,18 +272,18 @@ export default function CompositionSearch({
           {chips.map((c) => (
             <span
               key={c.mbid}
-              className="inline-flex items-center gap-1.5 bg-indigo-700 text-white rounded-full pl-1 pr-3 py-1 text-sm"
+              className="inline-flex items-center gap-1.5 bg-bg-raised border border-border-default text-text-primary rounded-full pl-1 pr-3 py-1 text-sm"
             >
               <CoverArt mbid={c.mbid} className="w-6 h-6 rounded-full" />
               <span className="font-medium">{c.title}</span>
               {c.artist && (
-                <span className="text-indigo-300 font-normal">
+                <span className="text-text-secondary font-normal">
                   · {c.artist}
                 </span>
               )}
               <button
                 onClick={() => removeChip(c.mbid)}
-                className="ml-1 hover:text-red-300 transition-colors leading-none"
+                className={`ml-1 hover:text-red transition-colors leading-none rounded ${FOCUS_RING}`}
                 aria-label={`Remove ${c.title}`}
               >
                 ×
@@ -291,7 +296,7 @@ export default function CompositionSearch({
       <button
         onClick={discover}
         disabled={chips.length === 0}
-        className="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-lg px-4 py-3 transition-colors"
+        className={`w-full bg-amber hover:bg-amber-dark disabled:opacity-40 disabled:cursor-not-allowed text-bg-base font-semibold rounded-lg px-4 py-3 transition-colors ${FOCUS_RING}`}
       >
         Discover
       </button>

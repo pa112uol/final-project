@@ -1,1 +1,34 @@
 @import "tailwindcss";
+
+@theme {
+  --color-bg-base: #0c0c0e;
+  --color-bg-surface: #161618;
+  --color-bg-raised: #1e1e22;
+
+  --color-border-subtle: #1a1a1e;
+  --color-border-default: #222226;
+
+  --color-text-primary: #f2eee6;
+  --color-text-secondary: #a8a49c;
+  --color-text-muted: #68686e;
+
+  --color-amber: #ffcc44;
+  --color-amber-dark: #e0a830;
+
+  --color-blue: #66bbff;
+  --color-blue-dark: #4499dd;
+
+  --color-green: #66dd99;
+  --color-red: #ff8888;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none;
+  }
+  .transition-opacity,
+  .transition-colors,
+  .transition {
+    transition: none;
+  }
+}

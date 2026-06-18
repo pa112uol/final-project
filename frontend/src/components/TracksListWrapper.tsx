@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import TracksList from "./TracksList";
+import { FOCUS_RING } from "../lib/styles";
 
 const MOODS = [
   "happy",
@@ -12,6 +13,7 @@ const MOODS = [
   "romantic",
   "focus",
 ] as const;
+
 
 export default function TracksListWrapper() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -63,52 +65,51 @@ export default function TracksListWrapper() {
   apiParams.set("novelty", String(novelty));
   const apiUrl = `/api/recommendations/?${apiParams.toString()}`;
 
+  const noveltyPct = Math.round(noveltyDisplay * 100);
+
   return (
     <div className="space-y-6">
-      <div className="bg-gray-900 rounded-xl p-4 space-y-4">
+      <div className="bg-bg-surface rounded-xl p-4 space-y-4">
         <div>
-          <p className="text-sm text-gray-400 mb-2">Mood</p>
+          <p className="text-sm text-text-secondary mb-2">Mood</p>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setMood(null)}
-              className={`px-3 py-1 rounded-full text-sm transition-colors ${
+              className={`px-3 py-1 rounded-full text-sm transition-colors ${FOCUS_RING} ${
                 mood === null
-                  ? "bg-indigo-600 text-white"
-                  : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                  ? "bg-amber text-bg-base font-semibold"
+                  : "border border-border-default text-text-secondary hover:bg-bg-raised"
               }`}
             >
-              Any
+              {mood === null && <span aria-hidden="true">✓ </span>}Any
             </button>
             {MOODS.map((m) => (
               <button
                 key={m}
                 onClick={() => setMood(m === mood ? null : m)}
-                className={`px-3 py-1 rounded-full text-sm capitalize transition-colors ${
+                className={`px-3 py-1 rounded-full text-sm capitalize transition-colors ${FOCUS_RING} ${
                   mood === m
-                    ? "bg-indigo-600 text-white"
-                    : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+                    ? "bg-amber text-bg-base font-semibold"
+                    : "border border-border-default text-text-secondary hover:bg-bg-raised"
                 }`}
               >
-                {m}
+                {mood === m && <span aria-hidden="true">✓ </span>}{m}
               </button>
             ))}
           </div>
         </div>
 
         <div>
-          <p className="text-sm text-gray-400 mb-1">
+          <p className="text-sm text-text-secondary mb-1">
             Novelty:{" "}
-            {noveltyDisplay === 0
-              ? "Popular"
-              : noveltyDisplay === 1
-                ? "Obscure"
-                : noveltyDisplay.toFixed(1)}
+            <span className="font-semibold text-text-primary">{noveltyPct}</span>
+            <span className="text-text-muted"> / 100</span>
           </p>
           <input
             type="range"
             min={0}
             max={1}
-            step={0.1}
+            step={0.01}
             value={noveltyDisplay}
             onChange={(e) => setNoveltyDisplay(Number(e.target.value))}
             onMouseUp={(e) =>
@@ -117,8 +118,19 @@ export default function TracksListWrapper() {
             onTouchEnd={(e) =>
               commitNovelty(Number((e.target as HTMLInputElement).value))
             }
-            className="w-full accent-indigo-500"
+            aria-label={`Novelty: ${noveltyPct} out of 100`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={noveltyPct}
+            className={`w-full accent-blue rounded ${FOCUS_RING}`}
           />
+          <div
+            className="flex justify-between text-xs text-text-muted mt-1"
+            aria-hidden="true"
+          >
+            <span>Popular</span>
+            <span>Obscure</span>
+          </div>
         </div>
       </div>
 

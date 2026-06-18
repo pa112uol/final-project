@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import CoverArt from "./CoverArt";
+import { FOCUS_RING } from "../lib/styles";
 
 interface StreamingLinks {
   appleMusic: string | null;
@@ -27,6 +28,9 @@ interface TracksListProps {
   onRefresh: () => void;
 }
 
+
+const LINK_CLASS = `text-blue underline hover:text-blue-dark transition-colors rounded ${FOCUS_RING}`;
+
 function fmtDuration(ms: number | null): string {
   if (!ms) return "";
   const total = Math.round(ms / 1000);
@@ -45,17 +49,19 @@ function TrackCard({ track }: { track: Track }) {
   const year = releaseYear(track);
   const duration = fmtDuration(track.durationMs);
   return (
-    <div className="bg-gray-800 rounded-xl p-4 space-y-3">
+    <div className="bg-bg-surface rounded-xl p-4 space-y-3">
       <div className="flex gap-3 items-start">
         {track.mbid && (
           <CoverArt mbid={track.mbid} className="w-16 h-16 rounded-lg" />
         )}
         <div className="min-w-0">
-          <h3 className="font-semibold text-lg leading-tight">{track.title}</h3>
-          <p className="text-gray-400 text-sm">
+          <h3 className="font-semibold text-lg leading-tight text-text-primary">
+            {track.title}
+          </h3>
+          <p className="text-text-secondary text-sm">
             {track.artist}
-            {year && <span className="ml-2 text-gray-500">{year}</span>}
-            {duration && <span className="ml-2 text-gray-500">{duration}</span>}
+            {year && <span className="ml-2 text-text-muted">{year}</span>}
+            {duration && <span className="ml-2 text-text-muted">{duration}</span>}
           </p>
         </div>
       </div>
@@ -82,7 +88,7 @@ function TrackCard({ track }: { track: Track }) {
             href={track.streaming.appleMusic}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-pink-400 hover:text-pink-300"
+            className={LINK_CLASS}
           >
             Apple Music
           </a>
@@ -91,7 +97,7 @@ function TrackCard({ track }: { track: Track }) {
           href={track.streaming.spotify}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-green-400 hover:text-green-300"
+          className={LINK_CLASS}
         >
           Spotify
         </a>
@@ -100,27 +106,32 @@ function TrackCard({ track }: { track: Track }) {
             href={`https://musicbrainz.org/recording/${track.mbid}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-400 hover:text-gray-300"
+            className={LINK_CLASS}
           >
             MusicBrainz
           </a>
         )}
       </div>
 
-      {track.tags.length > 0 && (
+      {track.tags.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {track.tags.slice(0, 5).map((tag) => (
             <span
               key={tag}
-              className="px-2 py-0.5 rounded-full bg-gray-700 text-gray-300 text-xs"
+              className="px-2 py-0.5 rounded-full bg-bg-raised text-text-secondary text-xs"
             >
               {tag}
             </span>
           ))}
         </div>
+      ) : (
+        <p className="text-xs text-text-muted flex items-center gap-1">
+          <span className="text-red" aria-hidden="true">⚠</span>
+          <span>no tags found</span>
+        </p>
       )}
 
-      <div className="text-xs text-gray-600 flex gap-3">
+      <div className="text-xs text-text-muted flex gap-3">
         <span>Relevance {(track.relevanceScore * 100).toFixed(0)}%</span>
         <span>Novelty {(track.noveltyScore * 100).toFixed(0)}%</span>
       </div>
@@ -162,11 +173,11 @@ export default function TracksList({ url, onRefresh }: TracksListProps) {
 
   if (loading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4" aria-busy="true" aria-label="Loading tracks">
         {Array.from({ length: 5 }).map((_, i) => (
           <div
             key={i}
-            className="bg-gray-800 rounded-xl p-4 h-24 animate-pulse"
+            className="bg-bg-surface rounded-xl p-4 h-24 animate-pulse"
           />
         ))}
       </div>
@@ -175,16 +186,24 @@ export default function TracksList({ url, onRefresh }: TracksListProps) {
 
   if (error) {
     return (
-      <div className="bg-red-900 rounded-xl p-4 text-red-200">
-        <p className="font-semibold">Error</p>
-        <p className="text-sm mt-1">{error}</p>
+      <div
+        role="alert"
+        className="bg-bg-raised border border-red rounded-xl p-4 text-text-primary flex gap-3 items-start"
+      >
+        <span className="text-red text-lg leading-none mt-0.5" aria-hidden="true">
+          ⚠
+        </span>
+        <div>
+          <p className="font-semibold">Error loading tracks</p>
+          <p className="text-sm mt-1 text-text-secondary">{error}</p>
+        </div>
       </div>
     );
   }
 
   if (!tracks || tracks.length === 0) {
     return (
-      <div className="text-center text-gray-500 py-12">
+      <div className="text-center text-text-muted py-12">
         No tracks found. Try different seeds or adjust novelty.
       </div>
     );
@@ -193,10 +212,10 @@ export default function TracksList({ url, onRefresh }: TracksListProps) {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-gray-400 text-sm">{tracks.length} tracks</p>
+        <p className="text-text-secondary text-sm">{tracks.length} tracks</p>
         <button
           onClick={onRefresh}
-          className="text-sm text-indigo-400 hover:text-indigo-300"
+          className={`text-sm text-blue hover:text-blue-dark transition-colors rounded ${FOCUS_RING}`}
         >
           Shuffle
         </button>
