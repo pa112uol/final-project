@@ -112,6 +112,33 @@ async def fetch_tag_artists(
     return result
 
 
+async def search_track(
+    query: str, api_key: str, limit: int = 10
+) -> list:
+    data = await _lf_fetch(
+        {"method": "track.search", "track": query, "limit": str(limit)},
+        api_key,
+    )
+    raw = (
+        data.get("results", {}).get("trackmatches", {}).get("track")
+        if data
+        else None
+    )
+    if not raw:
+        return []
+    arr = raw if isinstance(raw, list) else [raw]
+    return [
+        {
+            "name": t.get("name", ""),
+            "artist": t.get("artist", ""),
+            "url": t.get("url", ""),
+            "listeners": t.get("listeners", ""),
+            "mbid": t.get("mbid") or None,
+        }
+        for t in arr
+    ]
+
+
 async def fetch_artist_top_tracks(
     artist: str, limit: int, api_key: str
 ) -> list:

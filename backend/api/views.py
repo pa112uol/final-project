@@ -119,6 +119,9 @@ def search(request):
             "mbid": t["mbid"],
             "label": t["title"],
             "sub": t["artist"],
+            "album": t.get("album"),
+            "releaseType": t.get("release_type"),
+            "year": t.get("year"),
         }
         for t in tracks
     ]
@@ -143,8 +146,7 @@ def coverart(request):
     from clients.coverart import fetch_cover_art_url
 
     url = _run_async(fetch_cover_art_url(mbid))
-    if url:
-        _coverart_cache[mbid] = url
+    _coverart_cache[mbid] = url
     if not url:
         return JsonResponse({"error": "No cover art found"}, status=404)
     return JsonResponse({"url": url})

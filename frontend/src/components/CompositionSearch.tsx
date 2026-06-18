@@ -7,6 +7,9 @@ interface SearchResult {
   mbid: string;
   label: string;
   sub?: string;
+  album?: string | null;
+  releaseType?: string | null;
+  year?: string | null;
 }
 
 interface Seed {
@@ -18,7 +21,6 @@ interface Seed {
 interface CompositionSearchProps {
   onDiscover: (seeds: Seed[]) => void;
 }
-
 
 export default function CompositionSearch({
   onDiscover,
@@ -176,7 +178,7 @@ export default function CompositionSearch({
             onFocus={() => {
               if (results.length > 0) setOpen(true);
             }}
-            placeholder="Search for a track or artist - track..."
+            placeholder="Search for artist - track..."
             autoComplete="off"
             spellCheck={false}
             className={`w-full bg-bg-surface text-text-primary rounded-lg px-4 py-3 pr-10 outline-none border border-border-default ${FOCUS_RING}`}
@@ -226,13 +228,18 @@ export default function CompositionSearch({
           >
             {results.length === 0 ? (
               <li className="px-4 py-3 text-text-muted text-sm flex items-center gap-2">
-                <span className="text-red" aria-hidden="true">⚠</span>
+                <span className="text-red" aria-hidden="true">
+                  ⚠
+                </span>
                 <span>No results for &ldquo;{query}&rdquo;</span>
               </li>
             ) : (
               results.map((r, i) => {
                 const isActive = i === activeIndex;
                 const isAdded = chips.some((c) => c.mbid === r.mbid);
+                const meta = [r.sub, r.album, r.releaseType, r.year]
+                  .filter(Boolean)
+                  .join(" · ");
                 return (
                   <li key={r.mbid} role="option" aria-selected={isActive}>
                     <button
@@ -246,10 +253,12 @@ export default function CompositionSearch({
                       }`}
                     >
                       <span className="flex flex-col min-w-0">
-                        <span className="font-medium truncate text-text-primary">{r.label}</span>
-                        {r.sub && (
+                        <span className="font-medium truncate text-text-primary">
+                          {r.label}
+                        </span>
+                        {meta && (
                           <span className="text-text-secondary text-sm truncate">
-                            {r.sub}
+                            {meta}
                           </span>
                         )}
                       </span>

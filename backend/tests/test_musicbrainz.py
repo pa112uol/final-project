@@ -10,12 +10,23 @@ from clients.musicbrainz import (
 )
 
 
-def _make_recording(mbid="mbid1", title="Track", artist="Artist", score=100):
-    return {
+def _make_recording(mbid="mbid1", title="Track", artist="Artist", score=100, releases=None):
+    rec = {
         "id": mbid,
         "title": title,
         "artist-credit": [{"name": artist}],
         "score": score,
+    }
+    if releases is not None:
+        rec["releases"] = releases
+    return rec
+
+
+def _make_release(title="Album", release_type="Album", date="2000-01-01"):
+    return {
+        "title": title,
+        "date": date,
+        "release-group": {"primary-type": release_type},
     }
 
 
@@ -230,8 +241,6 @@ class TestSearchTracks:
         assert r["mbid"] == "abc"
         assert r["title"] == "Song"
         assert r["artist"] == "Band"
-        # score is a blended rapidfuzz + MB + popularity score; exact string
-        # match guarantees rf=100, so the final value is well above threshold
         assert isinstance(r["score"], float)
         assert r["score"] > 75.0
 
@@ -278,15 +287,12 @@ class TestSearchTracks:
         assert results[0]["mbid"] == "id1"
 
     async def test_limits_to_10_results(self):
-        # Use score=100 so all recordings pass the blended threshold regardless
-        # of the pop component (no releases in mock => pop=0).
         recs = [_make_recording(mbid=str(i), title=f"Song {i}", artist=f"Artist {i}", score=100) for i in range(20)]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("Song")
         assert len(results) == 10
 
     async def test_results_sorted_by_score_descending(self):
-        # Use structured query so artist/title are known; scores are now rapidfuzz floats
         recs = [
             _make_recording(mbid="exact", title="Creep", artist="Radiohead", score=99),
             _make_recording(mbid="partial", title="Creepy", artist="Other", score=75),
@@ -343,7 +349,7 @@ class TestSearchTracks:
         assert song_pos < interview_pos, "Proper song must rank above self-referential interview"
 
     async def test_self_titled_song_not_penalised(self):
-        # A self-titled song ("Oasis — Oasis") has the same word count as
+        # A self-titled song ("Oasis - Oasis") has the same word count as
         # the query, so the ≥q_words+2 guard prevents the penalty from firing.
         recs = [_make_recording(mbid="self-titled", title="Oasis", artist="Oasis", score=90)]
         with _patch_client(_make_response(recs)):
@@ -372,6 +378,51 @@ class TestSearchTracks:
         with _patch_client(resp):
             results = await search_tracks("anything")
         assert results == []
+
+    async def test_returns_album_title_and_release_type_from_first_release(self):
+        release = _make_release(title="OK Computer", release_type="Album")
+        rec = _make_recording(releases=[release])
+        with _patch_client(_make_response([rec])):
+            results = await search_tracks("Track")
+        assert results[0]["album"] == "OK Computer"
+        assert results[0]["release_type"] == "Album"
+
+    async def test_returns_year_from_release_date(self):
+        release = _make_release(date="1997-05-21")
+        rec = _make_recording(releases=[release])
+        with _patch_client(_make_response([rec])):
+            results = await search_tracks("Track")
+        assert results[0]["year"] == "1997"
+
+    async def test_year_from_first_release_date_takes_priority(self):
+        release = _make_release(date="1999-01-01")
+        rec = _make_recording(releases=[release])
+        rec["first-release-date"] = "1997-05-21"
+        with _patch_client(_make_response([rec])):
+            results = await search_tracks("Track")
+        assert results[0]["year"] == "1997"
+
+    async def test_year_falls_back_to_release_date_when_no_first_release_date(self):
+        release = _make_release(date="1997-05-21")
+        rec = _make_recording(releases=[release])
+        with _patch_client(_make_response([rec])):
+            results = await search_tracks("Track")
+        assert results[0]["year"] == "1997"
+
+    async def test_album_year_release_type_none_when_no_releases(self):
+        rec = _make_recording()
+        with _patch_client(_make_response([rec])):
+            results = await search_tracks("Track")
+        assert results[0]["album"] is None
+        assert results[0]["release_type"] is None
+        assert results[0]["year"] is None
+
+    async def test_year_none_when_date_missing(self):
+        release = {"title": "Some Album", "release-group": {"primary-type": "Album"}}
+        rec = _make_recording(releases=[release])
+        with _patch_client(_make_response([rec])):
+            results = await search_tracks("Track")
+        assert results[0]["year"] is None
 
 
 class TestResolveCanonicalMbid:
