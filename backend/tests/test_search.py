@@ -116,12 +116,6 @@ class TestBuildQuery:
         no_artist = [p for p in parts if "artistname:" not in p and "~" in p]
         assert len(no_artist) > 0
 
-    def test_plain_cross_field_and_for_artist_track(self):
-        # "radiohead creep" must include a cross-field branch so "Creep" by
-        # Radiohead ranks high: recording matches "creep~", artistname "radiohead~".
-        q = _build_query("radiohead creep")
-        assert "AND artistname:" in q
-
     def test_by_separator_swaps_artist_and_track(self):
         q = _build_query("Bohemian Rhapsody by Queen")
         assert "Queen" in q

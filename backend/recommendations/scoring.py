@@ -126,7 +126,7 @@ def score_and_sort(candidates: list, novelty: float) -> list:
             sc = c
             sc.final_score = final_score
             sc.relevance_score = relevance_norm
-            sc.novelty_score = popularity_obscurity
+            sc.novelty_score = obs
         else:
             sc = ScoredCandidate(
                 title=c.title if isinstance(c, Candidate) else c["title"],
@@ -142,7 +142,7 @@ def score_and_sort(candidates: list, novelty: float) -> list:
                 tags=c.tags if isinstance(c, Candidate) else c["tags"],
                 final_score=final_score,
                 relevance_score=relevance_norm,
-                novelty_score=popularity_obscurity,
+                novelty_score=obs,
             )
         result.append(sc)
 
