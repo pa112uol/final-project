@@ -28,7 +28,7 @@ async def _front_art_url(release_mbid: str) -> str | None:
         for image in res.json().get("images", []):
             if image.get("front"):
                 t = image.get("thumbnails", {})
-                return t.get("large") or t.get("small") or image.get("image")
+                return t.get("small") or t.get("250") or t.get("large") or image.get("image")
         return None
     except Exception:
         return None
