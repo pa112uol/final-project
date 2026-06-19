@@ -76,7 +76,14 @@ async def fetch_artist_top_recordings(artist_mbid: str, limit: int) -> list:
                     "duration_ms": r.get("length"),
                     "listen_count": r.get("total_listen_count", 0),
                     "user_count": r.get("total_user_count", 0),
-                    "tags": [t["tag"].lower() for t in (r.get("tags") or [])],
+                    "tags": [
+                        t["tag"].lower()
+                        for t in sorted(
+                            r.get("tags") or [],
+                            key=lambda t: t.get("count", 0),
+                            reverse=True,
+                        )
+                    ],
                 })
             return result
         except Exception as e:
