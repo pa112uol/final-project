@@ -9,7 +9,6 @@
 !.yarn/plugins
 !.yarn/releases
 !.yarn/versions
-/docs
 
 # testing
 /coverage
@@ -32,6 +31,8 @@ frontend/build/
 # misc
 .DS_Store
 *.pem
+/docs
+/references
 
 # debug
 npm-debug.log*
