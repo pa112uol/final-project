@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import httpx
 from .http import get_client
 
@@ -7,17 +8,23 @@ LB_BASE = "https://api.listenbrainz.org/1"
 
 logger = logging.getLogger(__name__)
 
-_CLIENT = dict(
-    timeout=15,
-    limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-)
+
+def _lb_client():
+    kwargs = dict(
+        timeout=15,
+        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+    )
+    token = os.environ.get("LISTENBRAINZ_API_KEY")
+    if token:
+        kwargs["headers"] = {"Authorization": f"Token {token}"}
+    return get_client("listenbrainz", **kwargs)
 
 
 async def fetch_recording_tags(mbid: str) -> list:
     if not mbid:
         return []
     try:
-        res = await get_client("listenbrainz", **_CLIENT).get(
+        res = await _lb_client().get(
             f"{LB_BASE}/metadata/recording/",
             params={"recording_mbids": mbid, "inc": "tag"},
         )
@@ -46,7 +53,7 @@ async def fetch_recording_tags(mbid: str) -> list:
 async def fetch_artist_top_recordings(artist_mbid: str, limit: int) -> list:
     for attempt in range(2):
         try:
-            res = await get_client("listenbrainz", **_CLIENT).get(
+            res = await _lb_client().get(
                 f"{LB_BASE}/popularity/top-recordings-for-artist/{artist_mbid}",
             )
             if res.status_code == 429:
@@ -97,7 +104,7 @@ async def fetch_recording_popularity(mbids: list) -> dict:
     if not valid_mbids:
         return {}
     try:
-        res = await get_client("listenbrainz", **_CLIENT).post(
+        res = await _lb_client().post(
             f"{LB_BASE}/popularity/recording",
             json={"recording_mbids": valid_mbids},
             headers={"Content-Type": "application/json"},
@@ -130,7 +137,7 @@ async def fetch_artist_popularity(artist_mbids: list) -> dict:
     if not valid_mbids:
         return {}
     try:
-        res = await get_client("listenbrainz", **_CLIENT).post(
+        res = await _lb_client().post(
             f"{LB_BASE}/popularity/artist",
             json={"artist_mbids": valid_mbids},
             headers={"Content-Type": "application/json"},
