@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { ArrowRight, Shuffle } from "lucide-react";
 import CoverArt from "./CoverArt";
+import NoveltySlider from "./NoveltySlider";
+import MoodPicker from "./MoodPicker";
 import { FOCUS_RING } from "../lib/styles";
 
 interface SearchResult {
@@ -19,11 +22,13 @@ interface Seed {
 }
 
 interface CompositionSearchProps {
-  onDiscover: (seeds: Seed[]) => void;
+  onDiscover: (seeds: Seed[], mood: string | null, novelty: number) => void;
+  onRandom?: () => void;
 }
 
 export default function CompositionSearch({
   onDiscover,
+  onRandom,
 }: CompositionSearchProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -31,6 +36,8 @@ export default function CompositionSearch({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [mood, setMood] = useState<string | null>(null);
+  const [novelty, setNovelty] = useState(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
@@ -122,7 +129,7 @@ export default function CompositionSearch({
   }
 
   function discover() {
-    if (chips.length > 0) onDiscover(chips);
+    if (chips.length > 0) onDiscover(chips, mood, novelty);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -155,8 +162,12 @@ export default function CompositionSearch({
   const showDropdown = open && !loading && query.trim().length > 0;
 
   return (
-    <div className="space-y-4">
-      <div className="relative" ref={containerRef}>
+    <div className="space-y-6">
+      <div>
+        <label className="block text-xs uppercase tracking-widest text-text-muted mb-1.5">
+          Pick a track
+        </label>
+        <div className="relative" ref={containerRef}>
         <div className="relative">
           <input
             ref={inputRef}
@@ -277,7 +288,7 @@ export default function CompositionSearch({
       </div>
 
       {chips.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 mt-3">
           {chips.map((c) => (
             <span
               key={c.mbid}
@@ -301,14 +312,41 @@ export default function CompositionSearch({
           ))}
         </div>
       )}
+      </div>
+
+      <div>
+        <label className="block text-xs uppercase tracking-widest text-text-muted mb-1.5">
+          Mood
+        </label>
+        <MoodPicker value={mood} onChange={setMood} />
+      </div>
+
+      <NoveltySlider value={novelty} onChange={setNovelty} />
 
       <button
         onClick={discover}
         disabled={chips.length === 0}
         className={`w-full bg-amber hover:bg-amber-dark disabled:opacity-40 disabled:cursor-not-allowed text-bg-base font-semibold rounded-lg px-4 py-3 transition-colors ${FOCUS_RING}`}
       >
-        Discover
+        Find Similar <ArrowRight className="inline-block ml-1 w-4 h-4" />
       </button>
+
+      {onRandom && (
+        <div className="flex items-center gap-3">
+          <div className="flex-1 h-px bg-border-default" />
+          <span className="text-xs text-text-muted uppercase tracking-widest">or</span>
+          <div className="flex-1 h-px bg-border-default" />
+        </div>
+      )}
+
+      {onRandom && (
+        <button
+          onClick={onRandom}
+          className={`w-full border border-border-default hover:border-text-muted text-text-secondary hover:text-text-primary font-semibold rounded-lg px-4 py-3 transition-colors ${FOCUS_RING}`}
+        >
+          <Shuffle className="inline-block mr-2 w-4 h-4" /> Surprise Me
+        </button>
+      )}
     </div>
   );
 }

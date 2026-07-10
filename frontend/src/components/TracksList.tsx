@@ -25,9 +25,7 @@ interface Track {
 
 interface TracksListProps {
   url: string;
-  onRefresh: () => void;
 }
-
 
 const LINK_CLASS = `text-blue underline hover:text-blue-dark transition-colors rounded ${FOCUS_RING}`;
 
@@ -61,7 +59,9 @@ function TrackCard({ track }: { track: Track }) {
           <p className="text-text-secondary text-sm">
             {track.artist}
             {year && <span className="ml-2 text-text-muted">{year}</span>}
-            {duration && <span className="ml-2 text-text-muted">{duration}</span>}
+            {duration && (
+              <span className="ml-2 text-text-muted">{duration}</span>
+            )}
           </p>
         </div>
       </div>
@@ -124,22 +124,17 @@ function TrackCard({ track }: { track: Track }) {
             </span>
           ))}
         </div>
-      ) : (
-        <p className="text-xs text-text-muted flex items-center gap-1">
-          <span className="text-red" aria-hidden="true">⚠</span>
-          <span>no tags found</span>
-        </p>
-      )}
+      ) : null}
 
       <div className="text-xs text-text-muted flex gap-3">
-        <span>Relevance {(track.relevanceScore * 100).toFixed(0)}%</span>
+        <span>Relevance {(track.relevanceScore * 100).toFixed(1)}%</span>
         <span>Novelty {(track.noveltyScore * 100).toFixed(0)}%</span>
       </div>
     </div>
   );
 }
 
-export default function TracksList({ url, onRefresh }: TracksListProps) {
+export default function TracksList({ url }: TracksListProps) {
   const [tracks, setTracks] = useState<Track[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -190,7 +185,10 @@ export default function TracksList({ url, onRefresh }: TracksListProps) {
         role="alert"
         className="bg-bg-raised border border-red rounded-xl p-4 text-text-primary flex gap-3 items-start"
       >
-        <span className="text-red text-lg leading-none mt-0.5" aria-hidden="true">
+        <span
+          className="text-red text-lg leading-none mt-0.5"
+          aria-hidden="true"
+        >
           ⚠
         </span>
         <div>
@@ -213,12 +211,6 @@ export default function TracksList({ url, onRefresh }: TracksListProps) {
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <p className="text-text-secondary text-sm">{tracks.length} tracks</p>
-        <button
-          onClick={onRefresh}
-          className={`text-sm text-blue hover:text-blue-dark transition-colors rounded ${FOCUS_RING}`}
-        >
-          Shuffle
-        </button>
       </div>
       {tracks.map((t) => (
         <TrackCard key={t.mbid || `${t.title}-${t.artist}`} track={t} />
