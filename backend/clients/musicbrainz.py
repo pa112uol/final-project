@@ -6,16 +6,23 @@ MB_BASE = "https://musicbrainz.org/ws/2"
 logger = logging.getLogger(__name__)
 
 _NOISE_RE = re.compile(
-    r'\s*[\(\[]\s*(?:official\s+(?:music\s+)?video|lyrics?|hd|remaster(?:ed)?|'
-    r'audio|live|explicit|clean|radio\s+edit)\s*[\)\]]',
+    r"\s*[\(\[]\s*(?:official\s+(?:music\s+)?video|lyrics?|hd|remaster(?:ed)?|"
+    r"audio|live|explicit|clean|radio\s+edit)\s*[\)\]]",
     re.IGNORECASE,
 )
-_FEAT_RE = re.compile(r'\s+feat\.?\s+.*$', re.IGNORECASE)
+_FEAT_RE = re.compile(r"\s+feat\.?\s+.*$", re.IGNORECASE)
 _QUOTES_RE = re.compile(r'^(["\'])(.+)\1$')
-_MULTI_SPACE_RE = re.compile(r'\s{2,}')
-_MB_ESCAPE_RE = re.compile(r'([\(\)\[\]{}\^~*?:\\/+\-&|!])')
-_BY_RE = re.compile(r'\s+by\s+', re.IGNORECASE)
-_DASH_RE = re.compile(r'\s*[–—‒/:\\-]\s*')
+_MULTI_SPACE_RE = re.compile(r"\s{2,}")
+_MB_ESCAPE_RE = re.compile(r"([\(\)\[\]{}\^~*?:\\/+\-&|!])")
+_BY_RE = re.compile(r"\s+by\s+", re.IGNORECASE)
+_DASH_RE = re.compile(r"\s*[–—‒/:\\-]\s*")
+
+# Exclude remixes, remasters, demos, edits, instrumentals, excerpts, commentaries
+# and acoustic versionsfrom canonical studio recordings
+_CANON_EXCLUDE = (
+    "-recording:(remix remaster remastered demo edit instrumental"
+    " excerpt commentary acoustic)"
+)
 
 _FIXED_FILTERS = (
     "status:official"
@@ -55,7 +62,7 @@ def _parse_artist_track(q: str) -> tuple[str | None, str]:
     matches = list(_BY_RE.finditer(q))
     if matches:
         m = matches[-1]
-        artist = q[m.end():].strip()
+        artist = q[m.end() :].strip()
         track = q[: m.start()].strip()
         if artist and track:
             return artist, track
@@ -70,24 +77,45 @@ def _build_query(q: str) -> str:
     artist, title = _parse_artist_track(q)
     esc_title = _escape_mb(title)
 
+    # If artis is present, search for recordings with the given title and artist name,
+    # as well as the reverse (title as artist and artist as title) to catch misattributed tracks.
+    # Also include canonical studio recordings and fuzzy matches on the title
     if artist:
         esc_artist = _escape_mb(artist)
         forward = f'recording:("{esc_title}") AND artistname:("{esc_artist}")'
         reversed_ = f'recording:("{esc_artist}") AND artistname:("{esc_title}")'
-        title_fuzzy = " AND ".join(f"recording:{_escape_mb(w)}~" for w in title.split() if w)
-        core = f'({forward}) OR ({reversed_}) OR ({title_fuzzy} AND artistname:{esc_artist}~)'
+        title_fuzzy = " AND ".join(
+            f"recording:{_escape_mb(w)}~" for w in title.split() if w
+        )
+        canonical = (
+            f"((({forward}) OR ({reversed_}))"
+            f" AND primarytype:album AND primarytype:single"
+            f" AND {_CANON_EXCLUDE})^4"
+        )
+        core = (
+            f"({forward}) OR ({reversed_}) OR ({canonical})"
+            f" OR ({title_fuzzy} AND artistname:{esc_artist}~)"
+        )
+    # If no artist is present, search for recordings with the given title, fuzzy matches on the title,
+    # and canonical studio recordings. Also include a branch that searches for the title as an artist
     else:
         words = title.split()
         phrase = f'recording:("{esc_title}")'
         fuzzy = " AND ".join(f"recording:{_escape_mb(w)}~" for w in words if w)
+        canonical = (
+            f"(({phrase}) AND primarytype:album AND primarytype:single"
+            f" AND {_CANON_EXCLUDE})^4"
+        )
         if len(words) == 1:
             esc_word = _escape_mb(words[0])
-            artist_branch = f'artistname:"{esc_word}" AND -recording:({esc_word}~)'
-            core = f'({phrase} OR {fuzzy}) OR ({artist_branch})'
+            artist_branch = (
+                f'artistname:"{esc_word}" AND -recording:({esc_word}~)'
+            )
+            core = f"({phrase} OR {fuzzy} OR {canonical}) OR ({artist_branch})"
         else:
-            core = f'{phrase} OR ({fuzzy})'
+            core = f"{phrase} OR ({fuzzy}) OR ({canonical})"
 
-    return f'({core}) AND {_FIXED_FILTERS}'
+    return f"({core}) AND {_FIXED_FILTERS}"
 
 
 def _blend_score(
@@ -158,8 +186,22 @@ async def search_tracks(q: str) -> list:
         seen_mbids.add(mbid)
         seen_pairs.add(pair)
 
+        # MB returns a recording's releases in arbitrary order, so take the
+        # original album: earliest release whose release group carries no
+        # secondary type (compilation, soundtrack, ...), albums before
+        # singles.  Undated releases sort last
         releases = r.get("releases") or []
-        first_release = releases[0] if releases else None
+        first_release = min(
+            releases,
+            key=lambda rel: (
+                bool((rel.get("release-group") or {}).get("secondary-types")),
+                {"Album": 0, "EP": 1, "Single": 2}.get(
+                    (rel.get("release-group") or {}).get("primary-type"), 3
+                ),
+                rel.get("date") or "9999",
+            ),
+            default=None,
+        )
         release_type = (
             first_release.get("release-group", {}).get("primary-type")
             if first_release
@@ -176,15 +218,17 @@ async def search_tracks(q: str) -> list:
         mb_score = int(r.get("score") or 0)
         blended = _blend_score(q_artist, q_title, title, artist_name, mb_score)
 
-        results.append({
-            "mbid": mbid,
-            "title": title,
-            "artist": artist_name,
-            "album": album,
-            "release_type": release_type,
-            "year": year,
-            "score": blended,
-        })
+        results.append(
+            {
+                "mbid": mbid,
+                "title": title,
+                "artist": artist_name,
+                "album": album,
+                "release_type": release_type,
+                "year": year,
+                "score": blended,
+            }
+        )
 
     results.sort(key=lambda x: x["score"], reverse=True)
     return results[:10]
