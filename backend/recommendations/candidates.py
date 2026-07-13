@@ -1,6 +1,7 @@
 import asyncio
 import math
 import logging
+import os
 from .types import Candidate
 from .constants import ARTISTS_PER_TAG, TOP_ARTISTS_COUNT, TRACKS_PER_ARTIST
 from .utils import get_field
@@ -8,6 +9,16 @@ from .utils import get_field
 logger = logging.getLogger(__name__)
 
 LB_CONCURRENCY = 5
+
+# RECORDING_SOURCE env var controls which source fetch_recordings_for_artist
+# uses for track discovery: "listenbrainz" (default) or "lastfm". Whichever is
+# selected is used exclusively, with no fallback to the other.
+RECORDING_SOURCES = ("listenbrainz", "lastfm")
+
+
+def _recording_source():
+    value = os.environ.get("RECORDING_SOURCE", "listenbrainz").strip().lower()
+    return value if value in RECORDING_SOURCES else "listenbrainz"
 
 
 # Artists ranked higher in tag.getTopArtists are stronger genre representatives.
@@ -94,23 +105,68 @@ async def resolve_missing_mbids_for_artists(top_artists, clients):
     )
 
 
+def _to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+# Normalises a raw Last.fm artist.getTopTracks entry into the same recording
+# shape ListenBrainz's top-recordings-for-artist returns, so downstream code
+# (get_field lookups, Candidate construction) doesn't need to know the source.
+def _lastfm_track_to_recording(track, fallback_artist_mbid):
+    title = get_field(track, "name")
+    if not title:
+        return None
+    artist_field = get_field(track, "artist") or {}
+    return {
+        "mbid": get_field(track, "mbid") or "",
+        "title": title,
+        "artist_mbid": get_field(artist_field, "mbid") or fallback_artist_mbid,
+        "duration_ms": None,
+        "listen_count": _to_int(get_field(track, "playcount")),
+        "user_count": _to_int(get_field(track, "listeners")),
+        "tags": [],
+    }
+
+
 async def fetch_recordings_for_artist(
-    artist, clients, sem, artist_tags, candidates
+    artist, clients, sem, artist_tags, candidates, api_key
 ):
     if not artist["mbid"]:
         return
+    source = _recording_source()
     async with sem:
-        try:
-            recordings = await clients.fetch_artist_top_recordings(
-                artist["mbid"], TRACKS_PER_ARTIST
-            )
-        except Exception as exc:
-            logger.warning(
-                "[candidates] fetch_artist_top_recordings failed for %s: %s",
-                artist["mbid"],
-                exc,
-            )
-            return
+        if source == "lastfm":
+            try:
+                lastfm_tracks = await clients.fetch_artist_top_tracks(
+                    artist["name"], TRACKS_PER_ARTIST, api_key
+                )
+                recordings = [
+                    recording
+                    for t in lastfm_tracks
+                    if (recording := _lastfm_track_to_recording(t, artist["mbid"]))
+                ]
+            except Exception as exc:
+                logger.warning(
+                    "[candidates] fetch_artist_top_tracks failed for %s: %s",
+                    artist["name"],
+                    exc,
+                )
+                recordings = []
+        else:
+            try:
+                recordings = await clients.fetch_artist_top_recordings(
+                    artist["mbid"], TRACKS_PER_ARTIST
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[candidates] fetch_artist_top_recordings failed for %s: %s",
+                    artist["mbid"],
+                    exc,
+                )
+                recordings = []
 
     artist_key = artist["name"].lower()
     matched_tags = list(artist_tags.get(artist_key, set()))
@@ -138,13 +194,13 @@ async def fetch_recordings_for_artist(
         )
 
 
-async def fetch_recordings_for_all_artists(top_artists, clients, artist_tags):
+async def fetch_recordings_for_all_artists(top_artists, clients, artist_tags, api_key):
     candidates = {}
     sem = asyncio.Semaphore(LB_CONCURRENCY)
     await asyncio.gather(
         *[
             fetch_recordings_for_artist(
-                artist, clients, sem, artist_tags, candidates
+                artist, clients, sem, artist_tags, candidates, api_key
             )
             for artist in top_artists
         ]
@@ -194,7 +250,7 @@ async def build_candidates(
 
     # Phase B: fetch top recordings from ListenBrainz: verified MBIDs + listen counts
     candidates = await fetch_recordings_for_all_artists(
-        top_artists, clients, artist_tags
+        top_artists, clients, artist_tags, api_key
     )
 
     result = list(candidates.values())

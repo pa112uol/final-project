@@ -32,6 +32,9 @@ def make_clients(**overrides):
         async def fetch_artist_top_recordings(self, mbid, limit):
             return [RECORDING_A]
 
+        async def fetch_artist_top_tracks(self, artist, limit, api_key):
+            return []
+
         async def resolve_artist_mbid(self, name):
             return "resolved-mbid"
 
@@ -247,3 +250,106 @@ class TestBuildCandidates:
         )
         await build_candidates(TOP_TAGS, "key", 0, clients)
         assert peak[0] <= 5
+
+
+class TestRecordingSourceEnvVar:
+    async def test_defaults_to_listenbrainz_when_unset(self):
+        lastfm_calls = []
+
+        async def fetch_artist_top_tracks(artist, limit, api_key):
+            lastfm_calls.append(artist)
+            return []
+
+        clients = make_clients(fetch_artist_top_tracks=fetch_artist_top_tracks)
+        result = await build_candidates(TOP_TAGS, "key", 0, clients)
+        assert lastfm_calls == []
+        assert len(result) == 1
+        assert result[0].title == "Track A"
+
+    async def test_listenbrainz_mode_does_not_call_lastfm_even_when_empty(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECORDING_SOURCE", "listenbrainz")
+        calls = []
+
+        async def fetch_artist_top_recordings(mbid, limit):
+            return []
+
+        async def fetch_artist_top_tracks(artist, limit, api_key):
+            calls.append(artist)
+            return [RECORDING_A]
+
+        clients = make_clients(
+            fetch_artist_top_recordings=fetch_artist_top_recordings,
+            fetch_artist_top_tracks=fetch_artist_top_tracks,
+        )
+        result = await build_candidates(TOP_TAGS, "key", 0, clients)
+        assert calls == []
+        assert result == []
+
+    async def test_lastfm_mode_is_used_even_when_listenbrainz_would_succeed(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECORDING_SOURCE", "lastfm")
+        lb_calls = []
+
+        async def fetch_artist_top_recordings(mbid, limit):
+            lb_calls.append(mbid)
+            return [RECORDING_A]
+
+        async def fetch_artist_top_tracks(artist, limit, api_key):
+            return [
+                {
+                    "name": "Lastfm Only Track",
+                    "mbid": "lf-rec-2",
+                    "playcount": "10",
+                    "listeners": "5",
+                    "artist": {"mbid": "artist-mbid-1"},
+                }
+            ]
+
+        clients = make_clients(
+            fetch_artist_top_recordings=fetch_artist_top_recordings,
+            fetch_artist_top_tracks=fetch_artist_top_tracks,
+        )
+        result = await build_candidates(TOP_TAGS, "key", 0, clients)
+        assert lb_calls == []
+        assert len(result) == 1
+        assert result[0].title == "Lastfm Only Track"
+
+    async def test_lastfm_mode_does_not_fall_back_to_listenbrainz_on_failure(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECORDING_SOURCE", "lastfm")
+        lb_calls = []
+
+        async def fetch_artist_top_recordings(mbid, limit):
+            lb_calls.append(mbid)
+            return [RECORDING_A]
+
+        async def fetch_artist_top_tracks(artist, limit, api_key):
+            raise Exception("Last.fm down")
+
+        clients = make_clients(
+            fetch_artist_top_recordings=fetch_artist_top_recordings,
+            fetch_artist_top_tracks=fetch_artist_top_tracks,
+        )
+        result = await build_candidates(TOP_TAGS, "key", 0, clients)
+        assert lb_calls == []
+        assert result == []
+
+    async def test_unknown_source_value_falls_back_to_listenbrainz(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECORDING_SOURCE", "spotify")
+        lastfm_calls = []
+
+        async def fetch_artist_top_tracks(artist, limit, api_key):
+            lastfm_calls.append(artist)
+            return []
+
+        clients = make_clients(fetch_artist_top_tracks=fetch_artist_top_tracks)
+        result = await build_candidates(TOP_TAGS, "key", 0, clients)
+        assert lastfm_calls == []
+        assert len(result) == 1
+        assert result[0].title == "Track A"

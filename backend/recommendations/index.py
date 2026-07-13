@@ -14,6 +14,7 @@ async def _make_real_clients():
         fetch_track_tags,
         fetch_track_tags_only,
         fetch_tag_artists,
+        fetch_artist_top_tracks,
     )
     from clients.listenbrainz import (
         fetch_artist_popularity,
@@ -37,6 +38,9 @@ async def _make_real_clients():
 
         async def fetch_artist_top_recordings(self, mbid, limit):
             return await fetch_artist_top_recordings(mbid, limit)
+
+        async def fetch_artist_top_tracks(self, artist, limit, api_key):
+            return await fetch_artist_top_tracks(artist, limit, api_key)
 
         async def resolve_artist_mbid(self, name):
             return await resolve_artist_mbid(name)
