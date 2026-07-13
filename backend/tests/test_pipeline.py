@@ -74,6 +74,9 @@ def make_clients(**overrides):
         async def fetch_artist_popularity(self, mbids):
             return {}
 
+        async def resolve_final_mbid(self, mbid, title, artist):
+            return mbid
+
         async def get_streaming_links(self, artist, title):
             return make_streaming()
 
@@ -126,6 +129,9 @@ class TestRunPipeline:
 
             async def fetch_artist_popularity(self, mbids):
                 return {}
+
+            async def resolve_final_mbid(self, mbid, title, artist):
+                return mbid
 
             async def get_streaming_links(self, artist, title):
                 return make_streaming()

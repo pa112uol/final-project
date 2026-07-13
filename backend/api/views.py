@@ -129,6 +129,10 @@ def search(request):
 
 
 _coverart_cache: dict = {}
+# A "no cover art" result is often a transient failure (rate limit, timeout)
+# rather than a real fact about the recording, so it's only cached briefly.
+# A found url is cached indefinitely since that data doesn't change.
+COVERART_NEGATIVE_TTL_S = 300
 
 
 @require_GET
@@ -137,16 +141,18 @@ def coverart(request):
     if not mbid:
         return JsonResponse({"error": "mbid required"}, status=400)
 
-    if mbid in _coverart_cache:
-        url = _coverart_cache[mbid]
-        if not url:
-            return JsonResponse({"error": "No cover art found"}, status=404)
-        return JsonResponse({"url": url})
+    cached = _coverart_cache.get(mbid)
+    if cached is not None:
+        url, negative_expires_at = cached
+        if url or time.time() < negative_expires_at:
+            if not url:
+                return JsonResponse({"error": "No cover art found"}, status=404)
+            return JsonResponse({"url": url})
 
     from clients.coverart import fetch_cover_art_url
 
     url = _run_async(fetch_cover_art_url(mbid))
-    _coverart_cache[mbid] = url
+    _coverart_cache[mbid] = (url, time.time() + COVERART_NEGATIVE_TTL_S)
     if not url:
         return JsonResponse({"error": "No cover art found"}, status=404)
     return JsonResponse({"url": url})
@@ -162,7 +168,7 @@ random_cache_lock = threading.Lock()
 
 
 async def _build_random_pool() -> list[dict]:
-    from clients.mb import mb_fetch
+    from clients.musicbrainz import mb_fetch
 
     letter = random.choice("abcdefghijklmnopqrstuvwxyz")
     offset = random.randint(0, 399)

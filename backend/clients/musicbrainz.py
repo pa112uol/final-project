@@ -1,9 +1,51 @@
+import asyncio
 import re
 import logging
 from .http import get_client
 
+# MusicBrainz requires a meaningful User-Agent: App/Version (contact)
+# See https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
 MB_BASE = "https://musicbrainz.org/ws/2"
+MB_MIN_INTERVAL_S = 1.05
+
 logger = logging.getLogger(__name__)
+
+# asyncio.Lock + a serial queue ensures MB requests are fully serialized.
+# Each request waits for the previous fetch + cooldown to finish before firing.
+_mb_lock = asyncio.Lock()
+_last_request_time = 0.0
+
+
+async def mb_fetch(url: str):
+    global _last_request_time
+    async with _mb_lock:
+        now = asyncio.get_running_loop().time()
+        elapsed = now - _last_request_time
+        if elapsed < MB_MIN_INTERVAL_S:
+            await asyncio.sleep(MB_MIN_INTERVAL_S - elapsed)
+        res = await get_client("musicbrainz", timeout=10).get(url)
+        _last_request_time = asyncio.get_running_loop().time()
+        return res
+
+
+async def resolve_artist_mbid(name: str) -> str:
+    clean_name = name.replace('"', "")
+    query = f'artist:"{clean_name}"'
+    try:
+        res = await mb_fetch(f"{MB_BASE}/artist?query={query}&limit=1&fmt=json")
+        if not res.is_success:
+            return ""
+        data = res.json()
+        artists = data.get("artists") or []
+        if not artists:
+            return ""
+        top = artists[0]
+        if top.get("score", 0) < 85:
+            return ""
+        return top.get("id", "")
+    except Exception:
+        return ""
+
 
 _NOISE_RE = re.compile(
     r"\s*[\(\[]\s*(?:official\s+(?:music\s+)?video|lyrics?|hd|remaster(?:ed)?|"
@@ -155,7 +197,9 @@ async def search_tracks(q: str) -> list:
     q_title = _FEAT_RE.sub("", q_title).strip()
 
     try:
-        res = await get_client("mb-search", timeout=10).get(
+        res = await get_client(
+            "mb-search", timeout=10, follow_redirects=True
+        ).get(
             f"{MB_BASE}/recording",
             params={"query": lucene_query, "fmt": "json", "limit": 100},
         )
@@ -234,15 +278,30 @@ async def search_tracks(q: str) -> list:
     return results[:10]
 
 
-async def resolve_canonical_mbid(mbid: str) -> str:
-    try:
-        res = await get_client("mb-search", timeout=10).get(
-            f"{MB_BASE}/recording/{mbid}",
-            params={"fmt": "json"},
-        )
-        if not res.is_success:
-            return mbid
-        data = res.json()
-        return data.get("id", mbid)
-    except Exception:
-        return mbid
+async def resolve_canonical_mbid(
+    mbid: str, title: str | None = None, artist: str | None = None
+) -> str:
+    if mbid:
+        try:
+            res = await get_client(
+                "mb-search", timeout=10, follow_redirects=True
+            ).get(f"{MB_BASE}/recording/{mbid}", params={"fmt": "json"})
+            if res.is_success:
+                data = res.json()
+                return data.get("id", mbid)
+        except Exception:
+            pass
+
+    # The direct id lookup failed (stale/merged/nonexistent mbid) or there
+    # was no mbid at all; fall back to searching by whatever title/artist
+    # data the caller does have and take the best-scoring match.
+    if title:
+        query = f"{artist} - {title}" if artist else title
+        try:
+            results = await search_tracks(query)
+        except Exception:
+            results = []
+        if results:
+            return results[0]["mbid"]
+
+    return mbid

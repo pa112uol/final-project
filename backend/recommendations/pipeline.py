@@ -280,7 +280,10 @@ async def build_track_from_candidate(candidate, clients):
     rel_score = get_field(candidate, "relevance_score")
     nov_score = get_field(candidate, "novelty_score")
     tags = get_field(candidate, "tags", [])
-    streaming = await clients.get_streaming_links(artist, title)
+    streaming, mbid = await asyncio.gather(
+        clients.get_streaming_links(artist, title),
+        clients.resolve_final_mbid(mbid, title, artist),
+    )
     return Track(
         mbid=mbid,
         title=title,

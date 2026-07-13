@@ -134,6 +134,10 @@ class PipelineClients(Protocol):
 
     async def fetch_artist_popularity(self, mbids: list) -> dict: ...
 
+    async def resolve_final_mbid(
+        self, mbid: str, title: str, artist: str
+    ) -> str: ...
+
     async def get_streaming_links(
         self, artist: str, title: str
     ) -> StreamingLinks: ...

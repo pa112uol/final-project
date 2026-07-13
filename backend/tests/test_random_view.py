@@ -74,7 +74,7 @@ class TestRandomEndpoint:
             _recording(mbid=f"rec-{i}", title=f"Track {i}") for i in range(10)
         ]
         with patch(
-            "clients.mb.mb_fetch",
+            "clients.musicbrainz.mb_fetch",
             new=AsyncMock(return_value=_mb_success(recordings)),
         ), patch(
             "clients.streaming.get_streaming_links",
@@ -91,7 +91,7 @@ class TestRandomEndpoint:
             _recording(mbid=f"rec-{i}", title=f"Track {i}") for i in range(20)
         ]
         with patch(
-            "clients.mb.mb_fetch",
+            "clients.musicbrainz.mb_fetch",
             new=AsyncMock(return_value=_mb_success(recordings)),
         ), patch(
             "clients.streaming.get_streaming_links",
@@ -104,7 +104,7 @@ class TestRandomEndpoint:
 
     def test_each_track_has_required_fields(self, rf):
         with patch(
-            "clients.mb.mb_fetch",
+            "clients.musicbrainz.mb_fetch",
             new=AsyncMock(return_value=_mb_success([_recording()])),
         ), patch(
             "clients.streaming.get_streaming_links",
@@ -127,7 +127,7 @@ class TestRandomEndpoint:
 
     def test_streaming_fields_present(self, rf):
         with patch(
-            "clients.mb.mb_fetch",
+            "clients.musicbrainz.mb_fetch",
             new=AsyncMock(return_value=_mb_success([_recording()])),
         ), patch(
             "clients.streaming.get_streaming_links",
@@ -141,7 +141,7 @@ class TestRandomEndpoint:
 
     def test_returns_502_when_mb_fails(self, rf):
         with patch(
-            "clients.mb.mb_fetch", new=AsyncMock(return_value=_mb_error())
+            "clients.musicbrainz.mb_fetch", new=AsyncMock(return_value=_mb_error())
         ):
             response = random_tracks(rf.get("/api/random/"))
 
@@ -150,7 +150,7 @@ class TestRandomEndpoint:
     def test_cache_prevents_second_mb_call(self, rf):
         recordings = [_recording(mbid=f"rec-{i}") for i in range(10)]
         mb_mock = AsyncMock(return_value=_mb_success(recordings))
-        with patch("clients.mb.mb_fetch", new=mb_mock), patch(
+        with patch("clients.musicbrainz.mb_fetch", new=mb_mock), patch(
             "clients.streaming.get_streaming_links",
             new=AsyncMock(return_value=_streaming()),
         ):
@@ -162,7 +162,7 @@ class TestRandomEndpoint:
     def test_stale_cache_refetches_from_mb(self, rf):
         recordings = [_recording(mbid=f"rec-{i}") for i in range(10)]
         mb_mock = AsyncMock(return_value=_mb_success(recordings))
-        with patch("clients.mb.mb_fetch", new=mb_mock), patch(
+        with patch("clients.musicbrainz.mb_fetch", new=mb_mock), patch(
             "clients.streaming.get_streaming_links",
             new=AsyncMock(return_value=_streaming()),
         ):
@@ -182,7 +182,7 @@ class TestRandomEndpoint:
             "releases": [],
         }
         with patch(
-            "clients.mb.mb_fetch",
+            "clients.musicbrainz.mb_fetch",
             new=AsyncMock(return_value=_mb_success([recording])),
         ), patch(
             "clients.streaming.get_streaming_links",

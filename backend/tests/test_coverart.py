@@ -33,3 +33,36 @@ def test_returns_404_when_no_art(rf):
     with patch("clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)):
         response = coverart(rf.get("/api/coverart/", {"mbid": "no-art-456"}))
     assert response.status_code == 404
+
+
+def test_found_url_is_cached_without_re_fetching(rf):
+    mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
+    with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
+        coverart(rf.get("/api/coverart/", {"mbid": "cached-mbid"}))
+        coverart(rf.get("/api/coverart/", {"mbid": "cached-mbid"}))
+    assert mock_fetch.call_count == 1
+
+
+def test_negative_result_is_not_cached_forever(rf):
+    with patch("clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)):
+        coverart(rf.get("/api/coverart/", {"mbid": "flaky-mbid"}))
+
+    # Simulate the negative cache entry's TTL having elapsed
+    url, _ = views._coverart_cache["flaky-mbid"]
+    views._coverart_cache["flaky-mbid"] = (url, 0)
+
+    with patch(
+        "clients.coverart.fetch_cover_art_url",
+        new=AsyncMock(return_value="https://example.com/recovered.jpg"),
+    ):
+        response = coverart(rf.get("/api/coverart/", {"mbid": "flaky-mbid"}))
+    assert response.status_code == 200
+    assert json.loads(response.content)["url"] == "https://example.com/recovered.jpg"
+
+
+def test_negative_result_within_ttl_is_not_re_fetched(rf):
+    mock_fetch = AsyncMock(return_value=None)
+    with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
+        coverart(rf.get("/api/coverart/", {"mbid": "no-art-789"}))
+        coverart(rf.get("/api/coverart/", {"mbid": "no-art-789"}))
+    assert mock_fetch.call_count == 1
