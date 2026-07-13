@@ -29,11 +29,8 @@ def make_clients(**overrides):
         async def fetch_tag_artists(self, tag, page, limit, api_key):
             return [{"name": "Slowdive", "mbid": "artist-mbid-1"}]
 
-        async def fetch_artist_top_recordings(self, mbid, limit):
+        async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
             return [RECORDING_A]
-
-        async def fetch_artist_top_tracks(self, artist, limit, api_key):
-            return []
 
         async def resolve_artist_mbid(self, name):
             return "resolved-mbid"
@@ -65,10 +62,10 @@ class TestBuildCandidates:
         assert result[0].tag_weight_sum == 100
 
     async def test_uses_recording_tags_when_present_artist_tags_as_fallback(self):
-        async def fetch_recordings(mbid, limit):
+        async def fetch_recordings(mbid, name, limit, api_key):
             return [RECORDING_A, RECORDING_B]
 
-        clients = make_clients(fetch_artist_top_recordings=fetch_recordings)
+        clients = make_clients(fetch_top_recordings_for_artist=fetch_recordings)
         result = await build_candidates(TOP_TAGS, "key", 0, clients)
         rec_a = next(c for c in result if c.mbid == "rec-a")
         rec_b = next(c for c in result if c.mbid == "rec-b")
@@ -176,6 +173,14 @@ class TestBuildCandidates:
         result = await build_candidates(TOP_TAGS, "key", 0, clients)
         assert result == []
 
+    async def test_swallows_fetch_top_recordings_for_artist_failures_without_throwing(self):
+        async def fetch_recordings(mbid, name, limit, api_key):
+            raise Exception("API down")
+
+        clients = make_clients(fetch_top_recordings_for_artist=fetch_recordings)
+        result = await build_candidates(TOP_TAGS, "key", 0, clients)
+        assert result == []
+
     async def test_selects_artists_with_highest_tag_weight_sum_when_list_exceeds_top_artists_count(self):
         # Build 20 artists with distinct scores. At novelty=0, top_artists_count=15.
         many_artists = [{"name": f"Artist{i}", "mbid": f"mbid-{i}"} for i in range(20)]
@@ -183,12 +188,12 @@ class TestBuildCandidates:
         async def fetch_tag_artists(tag, page, limit, api_key):
             return many_artists
 
-        async def fetch_recordings(mbid, limit):
+        async def fetch_recordings(mbid, name, limit, api_key):
             return [RECORDING_A]
 
         clients = make_clients(
             fetch_tag_artists=fetch_tag_artists,
-            fetch_artist_top_recordings=fetch_recordings,
+            fetch_top_recordings_for_artist=fetch_recordings,
         )
         result = await build_candidates(TOP_TAGS, "key", 0, clients)
         # At novelty=0, at most 15 artists, each with 1 recording = max 15 candidates
@@ -201,14 +206,14 @@ class TestBuildCandidates:
                 {"name": "Ride", "mbid": "mbid-2"},
             ]
 
-        async def fetch_recordings(mbid, limit):
+        async def fetch_recordings(mbid, name, limit, api_key):
             if mbid == "mbid-1":
                 return [{**RECORDING_A, "mbid": "rec-1", "artist_mbid": "mbid-1"}]
             return [{**RECORDING_A, "mbid": "rec-2", "artist_mbid": "mbid-2", "title": "Track B"}]
 
         clients = make_clients(
             fetch_tag_artists=fetch_tag_artists,
-            fetch_artist_top_recordings=fetch_recordings,
+            fetch_top_recordings_for_artist=fetch_recordings,
         )
         result = await build_candidates(TOP_TAGS, "key", 0, clients)
         slowdive = next(c for c in result if c.artist == "Slowdive")
@@ -219,22 +224,22 @@ class TestBuildCandidates:
     async def test_deduplicates_recordings_by_title_artist_key(self):
         duplicate = {**RECORDING_A, "mbid": "rec-a-dup"}
 
-        async def fetch_recordings(mbid, limit):
+        async def fetch_recordings(mbid, name, limit, api_key):
             return [RECORDING_A, duplicate]
 
-        clients = make_clients(fetch_artist_top_recordings=fetch_recordings)
+        clients = make_clients(fetch_top_recordings_for_artist=fetch_recordings)
         result = await build_candidates(TOP_TAGS, "key", 0, clients)
         track_a_titles = [c for c in result if c.title == "Track A"]
         # Same title+artist key: only one candidate is kept
         assert len(track_a_titles) == 1
 
-    async def test_never_exceeds_five_concurrent_fetch_artist_top_recordings_calls(self):
+    async def test_never_exceeds_five_concurrent_fetch_top_recordings_calls(self):
         # Build 15 artists (novelty=0 default) so the semaphore is exercised
         artists = [{"name": f"Artist{i}", "mbid": f"mbid-{i}"} for i in range(15)]
         peak = [0]
         in_flight = [0]
 
-        async def fetch_recordings(mbid, limit):
+        async def fetch_recordings(mbid, name, limit, api_key):
             in_flight[0] += 1
             peak[0] = max(peak[0], in_flight[0])
             await asyncio.sleep(0.01)
@@ -246,110 +251,7 @@ class TestBuildCandidates:
 
         clients = make_clients(
             fetch_tag_artists=fetch_tag_artists,
-            fetch_artist_top_recordings=fetch_recordings,
+            fetch_top_recordings_for_artist=fetch_recordings,
         )
         await build_candidates(TOP_TAGS, "key", 0, clients)
         assert peak[0] <= 5
-
-
-class TestRecordingSourceEnvVar:
-    async def test_defaults_to_listenbrainz_when_unset(self):
-        lastfm_calls = []
-
-        async def fetch_artist_top_tracks(artist, limit, api_key):
-            lastfm_calls.append(artist)
-            return []
-
-        clients = make_clients(fetch_artist_top_tracks=fetch_artist_top_tracks)
-        result = await build_candidates(TOP_TAGS, "key", 0, clients)
-        assert lastfm_calls == []
-        assert len(result) == 1
-        assert result[0].title == "Track A"
-
-    async def test_listenbrainz_mode_does_not_call_lastfm_even_when_empty(
-        self, monkeypatch
-    ):
-        monkeypatch.setenv("RECORDING_SOURCE", "listenbrainz")
-        calls = []
-
-        async def fetch_artist_top_recordings(mbid, limit):
-            return []
-
-        async def fetch_artist_top_tracks(artist, limit, api_key):
-            calls.append(artist)
-            return [RECORDING_A]
-
-        clients = make_clients(
-            fetch_artist_top_recordings=fetch_artist_top_recordings,
-            fetch_artist_top_tracks=fetch_artist_top_tracks,
-        )
-        result = await build_candidates(TOP_TAGS, "key", 0, clients)
-        assert calls == []
-        assert result == []
-
-    async def test_lastfm_mode_is_used_even_when_listenbrainz_would_succeed(
-        self, monkeypatch
-    ):
-        monkeypatch.setenv("RECORDING_SOURCE", "lastfm")
-        lb_calls = []
-
-        async def fetch_artist_top_recordings(mbid, limit):
-            lb_calls.append(mbid)
-            return [RECORDING_A]
-
-        async def fetch_artist_top_tracks(artist, limit, api_key):
-            return [
-                {
-                    "name": "Lastfm Only Track",
-                    "mbid": "lf-rec-2",
-                    "playcount": "10",
-                    "listeners": "5",
-                    "artist": {"mbid": "artist-mbid-1"},
-                }
-            ]
-
-        clients = make_clients(
-            fetch_artist_top_recordings=fetch_artist_top_recordings,
-            fetch_artist_top_tracks=fetch_artist_top_tracks,
-        )
-        result = await build_candidates(TOP_TAGS, "key", 0, clients)
-        assert lb_calls == []
-        assert len(result) == 1
-        assert result[0].title == "Lastfm Only Track"
-
-    async def test_lastfm_mode_does_not_fall_back_to_listenbrainz_on_failure(
-        self, monkeypatch
-    ):
-        monkeypatch.setenv("RECORDING_SOURCE", "lastfm")
-        lb_calls = []
-
-        async def fetch_artist_top_recordings(mbid, limit):
-            lb_calls.append(mbid)
-            return [RECORDING_A]
-
-        async def fetch_artist_top_tracks(artist, limit, api_key):
-            raise Exception("Last.fm down")
-
-        clients = make_clients(
-            fetch_artist_top_recordings=fetch_artist_top_recordings,
-            fetch_artist_top_tracks=fetch_artist_top_tracks,
-        )
-        result = await build_candidates(TOP_TAGS, "key", 0, clients)
-        assert lb_calls == []
-        assert result == []
-
-    async def test_unknown_source_value_falls_back_to_listenbrainz(
-        self, monkeypatch
-    ):
-        monkeypatch.setenv("RECORDING_SOURCE", "spotify")
-        lastfm_calls = []
-
-        async def fetch_artist_top_tracks(artist, limit, api_key):
-            lastfm_calls.append(artist)
-            return []
-
-        clients = make_clients(fetch_artist_top_tracks=fetch_artist_top_tracks)
-        result = await build_candidates(TOP_TAGS, "key", 0, clients)
-        assert lastfm_calls == []
-        assert len(result) == 1
-        assert result[0].title == "Track A"

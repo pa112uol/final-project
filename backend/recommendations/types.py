@@ -116,8 +116,8 @@ class PipelineClients(Protocol):
         self, tag: str, page: int, limit: int, api_key: str
     ) -> list: ...
 
-    async def fetch_artist_top_recordings(
-        self, mbid: str, limit: int
+    async def fetch_top_recordings_for_artist(
+        self, mbid: str, name: str, limit: int, api_key: str
     ) -> list: ...
 
     async def resolve_artist_mbid(self, name: str) -> str: ...

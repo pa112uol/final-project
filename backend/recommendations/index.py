@@ -1,5 +1,6 @@
 import sys
 import os
+from types import SimpleNamespace
 
 # Allow importing clients from the parent directory
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -7,54 +8,80 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from .pipeline import run_pipeline
 from .tags import MOOD_TAGS
 from .types import Seed, Track
+from .utils import get_field
 
 
-async def _make_real_clients():
-    from clients.lastfm import (
-        fetch_track_tags,
-        fetch_track_tags_only,
-        fetch_tag_artists,
-        fetch_artist_top_tracks,
+class Clients(SimpleNamespace):
+    pass
+
+
+# RECORDING_SOURCE env var controls which source fetch_top_recordings_for_artist
+# uses for track discovery: "listenbrainz" (default) or "lastfm"
+RECORDING_SOURCES = ("listenbrainz", "lastfm")
+
+
+def _recording_source():
+    value = os.environ.get("RECORDING_SOURCE", "listenbrainz").strip().lower()
+    return value if value in RECORDING_SOURCES else "listenbrainz"
+
+
+def _to_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+# Normalises a raw Last.fm artist.getTopTracks entry into the same recording
+# shape ListenBrainz's top-recordings-for-artist returns so callers don't
+# need to know which source produced it
+def _lastfm_track_to_recording(track, fallback_artist_mbid):
+    title = get_field(track, "name")
+    if not title:
+        return None
+    artist_field = get_field(track, "artist") or {}
+    return {
+        "mbid": get_field(track, "mbid") or "",
+        "title": title,
+        "artist_mbid": get_field(artist_field, "mbid") or fallback_artist_mbid,
+        "duration_ms": None,
+        "listen_count": _to_int(get_field(track, "playcount")),
+        "user_count": _to_int(get_field(track, "listeners")),
+        "tags": [],
+    }
+
+
+# Creates a namespace with the actual client implementations for the pipeline to use
+# This is the default for production, but tests can override it with a mock or stub implementation
+def _make_real_clients():
+    from clients import lastfm, listenbrainz, mb, streaming
+
+    async def fetch_top_recordings_for_artist(
+        artist_mbid, artist_name, limit, api_key
+    ):
+        if _recording_source() == "lastfm":
+            tracks = await lastfm.fetch_artist_top_tracks(
+                artist_name, limit, api_key
+            )
+            return [
+                recording
+                for t in tracks
+                if (recording := _lastfm_track_to_recording(t, artist_mbid))
+            ]
+        return await listenbrainz.fetch_artist_top_recordings(
+            artist_mbid, limit
+        )
+
+    return Clients(
+        fetch_tag_artists=lastfm.fetch_tag_artists,
+        fetch_track_tags=lastfm.fetch_track_tags,
+        fetch_track_tags_only=lastfm.fetch_track_tags_only,
+        fetch_top_recordings_for_artist=fetch_top_recordings_for_artist,
+        fetch_recording_tags=listenbrainz.fetch_recording_tags,
+        fetch_artist_popularity=listenbrainz.fetch_artist_popularity,
+        resolve_artist_mbid=mb.resolve_artist_mbid,
+        get_streaming_links=streaming.get_streaming_links,
     )
-    from clients.listenbrainz import (
-        fetch_artist_popularity,
-        fetch_artist_top_recordings,
-        fetch_recording_tags,
-    )
-    from clients.mb import resolve_artist_mbid
-    from clients.streaming import get_streaming_links
-
-    class RealClients:
-        async def fetch_tag_artists(self, tag, page, limit, api_key):
-            return await fetch_tag_artists(tag, page, limit, api_key)
-
-        async def fetch_track_tags(self, title, artist, api_key, mbid=None):
-            return await fetch_track_tags(title, artist, api_key, mbid)
-
-        async def fetch_track_tags_only(
-            self, title, artist, api_key, mbid=None
-        ):
-            return await fetch_track_tags_only(title, artist, api_key, mbid)
-
-        async def fetch_artist_top_recordings(self, mbid, limit):
-            return await fetch_artist_top_recordings(mbid, limit)
-
-        async def fetch_artist_top_tracks(self, artist, limit, api_key):
-            return await fetch_artist_top_tracks(artist, limit, api_key)
-
-        async def resolve_artist_mbid(self, name):
-            return await resolve_artist_mbid(name)
-
-        async def fetch_recording_tags(self, mbid):
-            return await fetch_recording_tags(mbid)
-
-        async def fetch_artist_popularity(self, mbids):
-            return await fetch_artist_popularity(mbids)
-
-        async def get_streaming_links(self, artist, title):
-            return await get_streaming_links(artist, title)
-
-    return RealClients()
 
 
 async def get_recommendations(
@@ -64,7 +91,7 @@ async def get_recommendations(
     novelty: float = 0,
     exclude_seed_artists: bool = True,
 ) -> list:
-    clients = await _make_real_clients()
+    clients = _make_real_clients()
     return await run_pipeline(
         seeds,
         api_key,

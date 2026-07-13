@@ -32,7 +32,7 @@ def make_clients(**overrides):
                 {"name": "Ride", "mbid": "mbid-ride"},
             ]
 
-        async def fetch_artist_top_recordings(self, mbid, limit):
+        async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
             tracks = {
                 "mbid-slowdive": [
                     {
@@ -118,7 +118,7 @@ class TestRunPipeline:
             async def fetch_tag_artists(self, tag, page, limit, api_key):
                 return []
 
-            async def fetch_artist_top_recordings(self, mbid, limit):
+            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
                 return []
 
             async def resolve_artist_mbid(self, name):
@@ -135,7 +135,7 @@ class TestRunPipeline:
 
     async def test_excludes_the_seed_track_itself_from_results(self):
         class SeedIncludedClients(make_clients().__class__):
-            async def fetch_artist_top_recordings(self, mbid, limit):
+            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
                 return [
                     {
                         "mbid": "seed-track-rec",
@@ -177,7 +177,7 @@ class TestRunPipeline:
 
     async def test_applies_mood_boost_happy_candidates_outrank_equal_non_happy(self):
         class MoodClients(make_clients().__class__):
-            async def fetch_artist_top_recordings(self, mbid, limit):
+            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
                 return [
                     {
                         "mbid": "rec-happy",
@@ -215,7 +215,7 @@ class TestRunPipeline:
         # This is the scenario where LB tags are pure genre labels; mood words come
         # only from LF enrichment.
         class MoodEnrichClients(make_clients().__class__):
-            async def fetch_artist_top_recordings(self, mbid, limit):
+            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
                 return [
                     {
                         "mbid": "rec-chill",
@@ -292,7 +292,7 @@ class TestRunPipeline:
             async def fetch_tag_artists(self, tag, page, limit, api_key):
                 return matching_artists + [{"name": "WrongGenreBand", "mbid": "mbid-wrong"}]
 
-            async def fetch_artist_top_recordings(self, mbid, limit):
+            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
                 if mbid == "mbid-wrong":
                     return [
                         {
@@ -342,7 +342,7 @@ class TestRunPipeline:
                     {"name": "Band C", "mbid": "mbid-band-c"},
                 ]
 
-            async def fetch_artist_top_recordings(self, mbid, limit):
+            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
                 return [
                     {
                         "mbid": f"{mbid}-track",
