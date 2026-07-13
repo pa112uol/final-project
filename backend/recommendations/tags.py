@@ -2,8 +2,9 @@ import re
 import math
 from .constants import LB_TAG_SCALE
 from .types import LFTag
+from .utils import get_field
 
-# Last.fm user-collection tags that describe listening habits, not musical content.
+# Last.fm user-collection tags that describe listening habits, not musical content
 NOISE_TAGS = {
     "seen live",
     "favorites",
@@ -75,13 +76,14 @@ MOOD_TAGS = {
 }
 
 
+# Normalize tags to a canonical form for merging and filtering
 def normalize_tag(tag: str) -> str:
     return tag.replace("-", " ")
 
 
 # Numeric tags ("-1001740215468") and specific year tags ("2019", "1990s")
 # that slip past BROAD_FETCH_TAGS produce useless artist lists from
-# tag.getTopArtists.
+# tag.getTopArtists
 def is_noise_tag(tag: str) -> bool:
     if re.fullmatch(r"-?\d+", tag):
         # numeric tags like -1001740215468
@@ -95,11 +97,12 @@ def is_noise_tag(tag: str) -> bool:
     return False
 
 
+# Merge ListenBrainz and Last.fm tags, weighting LB tags higher than LF tags
 def merge_tags(lb_tags: list, lf_tags: list) -> list:
     merged = {}
     for entry in lb_tags:
-        name = entry["name"] if isinstance(entry, dict) else entry.name
-        count = entry["count"] if isinstance(entry, dict) else entry.count
+        name = get_field(entry, "name")
+        count = get_field(entry, "count")
         norm = normalize_tag(name)
         if norm not in NOISE_TAGS:
             if norm in merged:
@@ -107,16 +110,19 @@ def merge_tags(lb_tags: list, lf_tags: list) -> list:
             else:
                 merged[norm] = {"count": count * LB_TAG_SCALE, "original": name}
     # Last.fm supplements with mood/vibe tags absent from LB; if a tag is
-    # already present from LB, keep the boosted LB weight.
+    # already present from LB, keep the boosted LB weight
     for entry in lf_tags:
-        name = entry["name"] if isinstance(entry, dict) else entry.name
-        count = entry["count"] if isinstance(entry, dict) else entry.count
+        name = get_field(entry, "name")
+        count = get_field(entry, "count")
         norm = normalize_tag(name)
         if norm not in NOISE_TAGS and norm not in merged:
             merged[norm] = {"count": count, "original": name}
-    return [LFTag(name=v["original"], count=v["count"]) for v in merged.values()]
+    return [
+        LFTag(name=v["original"], count=v["count"]) for v in merged.values()
+    ]
 
 
+# Compute tag weights for a set of seed tags, using TF-IDF style weighting
 def build_tag_weights(seed_tag_sets: list) -> dict:
     total_seeds = max(len(seed_tag_sets), 1)
     tag_tf = {}
@@ -126,8 +132,8 @@ def build_tag_weights(seed_tag_sets: list) -> dict:
     for tags in seed_tag_sets:
         seen_in_seed = set()
         for entry in tags:
-            name = entry.name if isinstance(entry, LFTag) else entry["name"]
-            count = entry.count if isinstance(entry, LFTag) else entry["count"]
+            name = get_field(entry, "name")
+            count = get_field(entry, "count")
             norm = normalize_tag(name)
             tag_tf[norm] = tag_tf.get(norm, 0) + count
             if norm not in tag_original:
@@ -136,9 +142,8 @@ def build_tag_weights(seed_tag_sets: list) -> dict:
                 tag_df[norm] = tag_df.get(norm, 0) + 1
                 seen_in_seed.add(norm)
 
-    # Standard IDF rewards rare tags by computing log(N/df), but for preference
-    # profiling a tag shared across all seeds is the strongest signal, not noise.
-    # Flipping the ratio to log(df/N) makes consensus boost weight rather than suppress it.
+    # Flipped from standard IDF: a tag shared by every seed is consensus, not
+    # noise, so log(df/N) rewards it instead of log(N/df) suppressing it.
     weights = {}
     for norm, tf in tag_tf.items():
         df = tag_df.get(norm, 1)

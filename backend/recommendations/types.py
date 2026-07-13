@@ -24,6 +24,12 @@ class Release:
     date: Optional[str] = None
 
 
+def _release_to_dict(r):
+    if isinstance(r, Release):
+        return {"mbid": r.mbid, "title": r.title, "date": r.date}
+    return r
+
+
 @dataclass
 class Track:
     mbid: str
@@ -46,12 +52,7 @@ class Track:
             "artistMbid": self.artist_mbid,
             "durationMs": self.duration_ms,
             "firstReleaseDate": self.first_release_date,
-            "releases": [
-                {"mbid": r.mbid, "title": r.title, "date": r.date}
-                if isinstance(r, Release)
-                else r
-                for r in self.releases
-            ],
+            "releases": [_release_to_dict(r) for r in self.releases],
             "streaming": {
                 "appleMusic": self.streaming.apple_music,
                 "preview": self.streaming.preview,
@@ -121,9 +122,7 @@ class PipelineClients(Protocol):
 
     async def resolve_artist_mbid(self, name: str) -> str: ...
 
-    async def fetch_recording_tags(
-        self, mbid: str
-    ) -> list: ...
+    async def fetch_recording_tags(self, mbid: str) -> list: ...
 
     async def fetch_track_tags(
         self, title: str, artist: str, api_key: str, mbid: Optional[str] = None
@@ -133,9 +132,7 @@ class PipelineClients(Protocol):
         self, title: str, artist: str, api_key: str, mbid: Optional[str] = None
     ) -> list: ...
 
-    async def fetch_artist_popularity(
-        self, mbids: list
-    ) -> dict: ...
+    async def fetch_artist_popularity(self, mbids: list) -> dict: ...
 
     async def get_streaming_links(
         self, artist: str, title: str

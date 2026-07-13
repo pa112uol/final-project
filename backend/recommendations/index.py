@@ -10,7 +10,11 @@ from .types import Seed, Track
 
 
 async def _make_real_clients():
-    from clients.lastfm import fetch_track_tags, fetch_track_tags_only, fetch_tag_artists
+    from clients.lastfm import (
+        fetch_track_tags,
+        fetch_track_tags_only,
+        fetch_tag_artists,
+    )
     from clients.listenbrainz import (
         fetch_artist_popularity,
         fetch_artist_top_recordings,
@@ -26,7 +30,9 @@ async def _make_real_clients():
         async def fetch_track_tags(self, title, artist, api_key, mbid=None):
             return await fetch_track_tags(title, artist, api_key, mbid)
 
-        async def fetch_track_tags_only(self, title, artist, api_key, mbid=None):
+        async def fetch_track_tags_only(
+            self, title, artist, api_key, mbid=None
+        ):
             return await fetch_track_tags_only(title, artist, api_key, mbid)
 
         async def fetch_artist_top_recordings(self, mbid, limit):

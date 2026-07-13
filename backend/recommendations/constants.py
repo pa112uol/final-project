@@ -1,7 +1,7 @@
 RECOMMENDATION_LIMIT = 10
-# LB tag counts are roughly 1-10; LF tag counts go up to 100.
+# LB tag counts are roughly 1-10, LF tag counts go up to 100.
 # Scale LB up so they dominate TF in build_tag_weights while still letting
-# LF mood/vibe tags supplement.
+# LF mood/vibe tags supplement
 LB_TAG_SCALE = 15
 TOP_TAGS_COUNT = 6
 ARTISTS_PER_TAG = 30

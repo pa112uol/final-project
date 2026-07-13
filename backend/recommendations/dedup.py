@@ -1,12 +1,13 @@
 import re
-from .types import Candidate, Seed
+from .types import Candidate
+from .utils import get_field
 
 
 # Strip edition/version suffixes (" - Remastered", " (Live)", " [Bonus Track]"),
 # featuring credits (" feat. X", " ft. X", " featuring X"), and part indicators
 # (", Part 2", ", Pt. II") so variant recordings collapse to a single dedup key.
 # Space before the delimiter avoids clipping hyphenated titles like "Drive-In".
-# Requiring a dot for bare "ft" avoids false positives like "12 sq ft room".
+# Requiring a dot for bare "ft" avoids false positives like "12 sq ft room"
 def normalize_title(title: str) -> str:
     result = title.lower()
     result = re.sub(r" [-(\[].*$", "", result)
@@ -19,7 +20,9 @@ def titles_overlap(a: str, b: str) -> bool:
     if a == b:
         return True
     longer, shorter = (a, b) if len(a) >= len(b) else (b, a)
-    if longer.startswith(shorter) and re.match(r"^ [-(\[]", longer[len(shorter):]):
+    if longer.startswith(shorter) and re.match(
+        r"^ [-(\[]", longer[len(shorter) :]
+    ):
         return True
     return False
 
@@ -29,18 +32,12 @@ def filter_seeds(
     seeds: list,
     exclude_seed_artists: bool = True,
 ) -> list:
-    seed_artists = {
-        (s.artist.lower() if isinstance(s, Seed) else s["artist"].lower())
-        for s in seeds
-    }
-    seed_titles = [
-        (s.title.lower() if isinstance(s, Seed) else s["title"].lower())
-        for s in seeds
-    ]
+    seed_artists = {get_field(s, "artist").lower() for s in seeds}
+    seed_titles = [get_field(s, "title").lower() for s in seeds]
 
     def keep(c: Candidate) -> bool:
-        artist = c.artist.lower() if isinstance(c, Candidate) else c["artist"].lower()
-        title = c.title.lower() if isinstance(c, Candidate) else c["title"].lower()
+        artist = get_field(c, "artist").lower()
+        title = get_field(c, "title").lower()
         if exclude_seed_artists and artist in seed_artists:
             return False
         return not any(titles_overlap(t, title) for t in seed_titles)
@@ -52,7 +49,7 @@ def deduplicate_by_mbid(candidates: list) -> list:
     seen_mbids = set()
     result = []
     for c in candidates:
-        mbid = c.mbid if isinstance(c, Candidate) else c["mbid"]
+        mbid = get_field(c, "mbid")
         if not mbid:
             result.append(c)
             continue
@@ -63,35 +60,28 @@ def deduplicate_by_mbid(candidates: list) -> list:
     return result
 
 
+def _title_variant_wins(candidate, prev) -> bool:
+    has_mbid = bool(get_field(candidate, "mbid"))
+    prev_has_mbid = bool(get_field(prev, "mbid"))
+    if has_mbid != prev_has_mbid:
+        return has_mbid
+    return get_field(candidate, "listen_count") > get_field(
+        prev, "listen_count"
+    )
+
+
 # Collapse variant recordings (remaster/live/single editions) that share a
-# normalized title + artist but carry distinct MBIDs, which deduplicate_by_mbid
+# normalized title + artist but carry distinct MBIDs which deduplicate_by_mbid
 # cannot catch. Keep the variant with an MBID (enables popularity lookup),
 # then the one with more listens.
 def deduplicate_by_title(candidates: list) -> list:
     kept = {}
     for c in candidates:
-        title = c.title if isinstance(c, Candidate) else c["title"]
-        artist = c.artist if isinstance(c, Candidate) else c["artist"]
-        mbid = c.mbid if isinstance(c, Candidate) else c["mbid"]
-        listen_count = c.listen_count if isinstance(c, Candidate) else c["listen_count"]
-
+        title = get_field(c, "title")
+        artist = get_field(c, "artist")
         norm_key = f"{normalize_title(title)}|||{artist.lower()}"
         prev = kept.get(norm_key)
-        if prev is None:
-            kept[norm_key] = c
-            continue
-
-        prev_mbid = prev.mbid if isinstance(prev, Candidate) else prev["mbid"]
-        prev_listen = (
-            prev.listen_count if isinstance(prev, Candidate) else prev["listen_count"]
-        )
-        has_mbid = bool(mbid)
-        prev_has_mbid = bool(prev_mbid)
-        if has_mbid != prev_has_mbid:
-            c_wins = has_mbid
-        else:
-            c_wins = listen_count > prev_listen
-        if c_wins:
+        if prev is None or _title_variant_wins(c, prev):
             kept[norm_key] = c
 
     return list(kept.values())
