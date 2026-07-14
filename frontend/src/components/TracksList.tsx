@@ -7,6 +7,7 @@ interface StreamingLinks {
   preview: string | null;
   youtubeVideoId: string | null;
   spotify: string;
+  artwork: { small: string; medium: string; large: string } | null;
 }
 
 interface Track {
@@ -50,7 +51,11 @@ function TrackCard({ track }: { track: Track }) {
     <div className="bg-bg-surface rounded-xl p-4 space-y-3">
       <div className="flex gap-3 items-start">
         {track.mbid && (
-          <CoverArt mbid={track.mbid} className="w-16 h-16 rounded-lg" />
+          <CoverArt
+            mbid={track.mbid}
+            artworkUrl={track.streaming.artwork?.medium}
+            className="w-16 h-16 rounded-lg"
+          />
         )}
         <div className="min-w-0">
           <h3 className="font-semibold text-lg leading-tight text-text-primary">
@@ -218,3 +223,4 @@ export default function TracksList({ url }: TracksListProps) {
     </div>
   );
 }
+

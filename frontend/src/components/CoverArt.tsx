@@ -2,21 +2,33 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 interface CoverArtProps {
   mbid: string;
+  artworkUrl?: string | null;
   className?: string;
 }
 
 export default function CoverArt({
   mbid,
+  artworkUrl,
   className = "w-16 h-16 rounded-lg",
 }: CoverArtProps) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [fetching, setFetching] = useState(true);
+  const [url, setUrl] = useState<string | null>(artworkUrl ?? null);
+  const [fetching, setFetching] = useState(!artworkUrl);
   const [imgReady, setImgReady] = useState(false);
   const imgRef = useRef<HTMLImageElement>(null);
 
   const handleLoad = useCallback(() => setImgReady(true), []);
 
+  // ArtworkUrl is a pre-resolved iTunes image that ships with
+  // the track already, so it skips the /api/coverart request entirely.
+  // Falling back to the mbid-driven fetch only happens when it's absent.
   useEffect(() => {
+    if (artworkUrl) {
+      setUrl(artworkUrl);
+      setFetching(false);
+      setImgReady(false);
+      return;
+    }
+
     let cancelled = false;
     setUrl(null);
     setFetching(true);
@@ -33,7 +45,7 @@ export default function CoverArt({
     return () => {
       cancelled = true;
     };
-  }, [mbid]);
+  }, [mbid, artworkUrl]);
 
   // Handle images already in the browser cache
   useEffect(() => {
@@ -81,3 +93,4 @@ export default function CoverArt({
     </div>
   );
 }
+

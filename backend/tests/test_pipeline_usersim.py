@@ -9,6 +9,7 @@ Run with: pytest tests/test_pipeline_usersim.py -s -v
 
 Mirrors the assertions defined in pipeline.usersim.test.ts.
 """
+
 import os
 import time
 import asyncio
@@ -49,9 +50,23 @@ _load_env()
 API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
 BROAD_LABELS = {
-    "rock", "pop", "metal", "electronic", "indie", "alternative",
-    "folk", "jazz", "classical", "hip hop", "rap", "country",
-    "soul", "blues", "r&b", "dance", "punk",
+    "rock",
+    "pop",
+    "metal",
+    "electronic",
+    "indie",
+    "alternative",
+    "folk",
+    "jazz",
+    "classical",
+    "hip hop",
+    "rap",
+    "country",
+    "soul",
+    "blues",
+    "r&b",
+    "dance",
+    "punk",
 }
 
 
@@ -91,7 +106,7 @@ def analyse_quality(label: str, tracks: list) -> dict:
 def print_quality(report: dict, tracks: list):
     print(f"\n{'=' * 60}")
     print(f"[QUALITY] {report['scenario']}")
-    diversity_pct = report['artist_diversity'] * 100
+    diversity_pct = report["artist_diversity"] * 100
     print(
         f"tracks: {report['track_count']}  unique artists: "
         f"{report['unique_artists']}/{report['track_count']} "
@@ -110,7 +125,7 @@ def print_quality(report: dict, tracks: list):
     print("  results:")
     for i, t in enumerate(tracks):
         print(
-            f"[{i + 1}] \"{t.title}\" -- {t.artist}"
+            f'[{i + 1}] "{t.title}" -- {t.artist}'
             f"  rel:{t.relevance_score:.3f} nov:{t.novelty_score:.3f}"
         )
     print("=" * 60)
@@ -151,7 +166,9 @@ def synth_pop_tracks():
             0,
         )
     )
-    print(f"\n[TIME] UserSim A (synth-pop): {time.perf_counter() - t_start:.2f}s")
+    print(
+        f"\n[TIME] UserSim A (synth-pop): {time.perf_counter() - t_start:.2f}s"
+    )
     return result
 
 
@@ -179,13 +196,21 @@ def classic_rock_tracks():
     t_start = time.perf_counter()
     result = asyncio.run(
         get_recommendations(
-            [{"mbid": "", "title": "stairway to heaven", "artist": "led zeppelin"}],
+            [
+                {
+                    "mbid": "",
+                    "title": "stairway to heaven",
+                    "artist": "led zeppelin",
+                }
+            ],
             API_KEY,
             None,
             0,
         )
     )
-    print(f"\n[TIME] UserSim C (classic rock): {time.perf_counter() - t_start:.2f}s")
+    print(
+        f"\n[TIME] UserSim C (classic rock): {time.perf_counter() - t_start:.2f}s"
+    )
     return result
 
 
@@ -202,7 +227,9 @@ def ultra_niche_tracks():
             0,
         )
     )
-    print(f"\n[TIME] UserSim D (ultra-niche): {time.perf_counter() - t_start:.2f}s")
+    print(
+        f"\n[TIME] UserSim D (ultra-niche): {time.perf_counter() - t_start:.2f}s"
+    )
     return result
 
 
@@ -214,7 +241,13 @@ def multi_seed_tracks():
     async def _gather():
         return await asyncio.gather(
             get_recommendations(
-                [{"mbid": "", "title": "bloodbuzz ohio", "artist": "the national"}],
+                [
+                    {
+                        "mbid": "",
+                        "title": "bloodbuzz ohio",
+                        "artist": "the national",
+                    }
+                ],
                 API_KEY,
                 None,
                 0,
@@ -227,7 +260,11 @@ def multi_seed_tracks():
             ),
             get_recommendations(
                 [
-                    {"mbid": "", "title": "bloodbuzz ohio", "artist": "the national"},
+                    {
+                        "mbid": "",
+                        "title": "bloodbuzz ohio",
+                        "artist": "the national",
+                    },
                     {"mbid": "", "title": "skinny love", "artist": "bon iver"},
                 ],
                 API_KEY,
@@ -238,7 +275,9 @@ def multi_seed_tracks():
 
     t_start = time.perf_counter()
     national, bon_iver, multi = asyncio.run(_gather())
-    print(f"\n[TIME] UserSim E (multi-seed, 3x parallel): {time.perf_counter() - t_start:.2f}s")
+    print(
+        f"\n[TIME] UserSim E (multi-seed, 3x parallel): {time.perf_counter() - t_start:.2f}s"
+    )
     return national, bon_iver, multi
 
 
@@ -257,11 +296,14 @@ def novelty_gradient_tracks():
 
     t_start = time.perf_counter()
     t0, t5, t1 = asyncio.run(_gather())
-    print(f"\n[TIME] UserSim F (novelty gradient, 3x parallel): {time.perf_counter() - t_start:.2f}s")
+    print(
+        f"\n[TIME] UserSim F (novelty gradient, 3x parallel): {time.perf_counter() - t_start:.2f}s"
+    )
     return t0, t5, t1
 
 
 # UserSim A -- Mainstream synth-pop: "Blinding Lights" -- The Weeknd
+
 
 class TestUserSimA:
     def test_returns_results(self, synth_pop_tracks):
@@ -302,6 +344,7 @@ class TestUserSimA:
 
 # UserSim B -- Hip-hop: "HUMBLE." -- Kendrick Lamar
 
+
 class TestUserSimB:
     def test_returns_results(self, hip_hop_tracks):
         if not API_KEY:
@@ -340,6 +383,7 @@ class TestUserSimB:
 
 # UserSim C -- Classic rock: "Stairway to Heaven" -- Led Zeppelin
 
+
 class TestUserSimC:
     def test_returns_results(self, classic_rock_tracks):
         if not API_KEY:
@@ -349,7 +393,9 @@ class TestUserSimC:
     def test_all_tracks_have_valid_shape(self, classic_rock_tracks):
         if not API_KEY or not classic_rock_tracks:
             return
-        report = analyse_quality("Classic rock (novelty=0)", classic_rock_tracks)
+        report = analyse_quality(
+            "Classic rock (novelty=0)", classic_rock_tracks
+        )
         print_quality(report, classic_rock_tracks)
         for t in classic_rock_tracks:
             assert_shape(t)
@@ -360,13 +406,20 @@ class TestUserSimC:
         assert_artist_cap(classic_rock_tracks)
 
     def test_at_least_5_unique_artists(self, classic_rock_tracks):
-        if not API_KEY or not classic_rock_tracks or len(classic_rock_tracks) < 5:
+        if (
+            not API_KEY
+            or not classic_rock_tracks
+            or len(classic_rock_tracks) < 5
+        ):
             return
-        report = analyse_quality("Classic rock (novelty=0)", classic_rock_tracks)
+        report = analyse_quality(
+            "Classic rock (novelty=0)", classic_rock_tracks
+        )
         assert report["unique_artists"] >= 5
 
 
 # UserSim D -- Ultra-niche: "Alien Observer" -- Grouper
+
 
 class TestUserSimD:
     def test_returns_an_array(self, ultra_niche_tracks):
@@ -377,7 +430,9 @@ class TestUserSimD:
     def test_all_tracks_have_valid_shape(self, ultra_niche_tracks):
         if not API_KEY or not ultra_niche_tracks:
             return
-        report = analyse_quality("Ultra-niche Grouper (novelty=0)", ultra_niche_tracks)
+        report = analyse_quality(
+            "Ultra-niche Grouper (novelty=0)", ultra_niche_tracks
+        )
         print_quality(report, ultra_niche_tracks)
         for t in ultra_niche_tracks:
             assert_shape(t)
@@ -387,14 +442,19 @@ class TestUserSimD:
             return
         assert_artist_cap(ultra_niche_tracks)
 
-    def test_if_results_returned_no_zero_relevance_tracks(self, ultra_niche_tracks):
+    def test_if_results_returned_no_zero_relevance_tracks(
+        self, ultra_niche_tracks
+    ):
         if not API_KEY or not ultra_niche_tracks:
             return
-        report = analyse_quality("Ultra-niche Grouper (novelty=0)", ultra_niche_tracks)
+        report = analyse_quality(
+            "Ultra-niche Grouper (novelty=0)", ultra_niche_tracks
+        )
         assert report["tracks_with_zero_relevance"] == 0
 
 
 # UserSim E -- Multi-seed indie: The National + Bon Iver
+
 
 class TestUserSimE:
     def test_all_three_runs_return_arrays(self, multi_seed_tracks):
@@ -416,7 +476,9 @@ class TestUserSimE:
         if multi:
             assert_artist_cap(multi)
 
-    def test_multi_seed_result_differs_from_both_single_seed_results(self, multi_seed_tracks):
+    def test_multi_seed_result_differs_from_both_single_seed_results(
+        self, multi_seed_tracks
+    ):
         if not API_KEY:
             return
         national, bon_iver, multi = multi_seed_tracks
@@ -431,7 +493,9 @@ class TestUserSimE:
         # Multi top result must differ from at least one of the single-seed tops
         assert not (top1_m == top1_n and top1_m == top1_b)
 
-    def test_seed_artists_excluded_from_their_own_results(self, multi_seed_tracks):
+    def test_seed_artists_excluded_from_their_own_results(
+        self, multi_seed_tracks
+    ):
         if not API_KEY:
             return
         national, bon_iver, multi = multi_seed_tracks
@@ -453,8 +517,11 @@ class TestUserSimE:
 
 # UserSim F -- Novelty gradient: 0 vs 0.5 vs 1, "Teardrop" -- Massive Attack
 
+
 class TestUserSimF:
-    def test_all_three_novelty_levels_return_arrays(self, novelty_gradient_tracks):
+    def test_all_three_novelty_levels_return_arrays(
+        self, novelty_gradient_tracks
+    ):
         if not API_KEY:
             return
         t0, t5, t1 = novelty_gradient_tracks
@@ -462,7 +529,9 @@ class TestUserSimF:
         assert isinstance(t5, list)
         assert isinstance(t1, list)
 
-    def test_novelty_0_5_avg_novelty_score_is_between_0_and_1(self, novelty_gradient_tracks):
+    def test_novelty_0_5_avg_novelty_score_is_between_0_and_1(
+        self, novelty_gradient_tracks
+    ):
         if not API_KEY:
             return
         t0, t5, t1 = novelty_gradient_tracks
@@ -479,7 +548,9 @@ class TestUserSimF:
         assert n5 >= n0
         assert n1 >= n5
 
-    def test_novelty_0_5_avg_relevance_is_between_0_and_1(self, novelty_gradient_tracks):
+    def test_novelty_0_5_avg_relevance_is_between_0_and_1(
+        self, novelty_gradient_tracks
+    ):
         if not API_KEY:
             return
         t0, t5, t1 = novelty_gradient_tracks
@@ -496,7 +567,9 @@ class TestUserSimF:
         assert r5 <= r0 + 0.10  # may be slightly above due to pool differences
         assert r1 <= r5 + 0.10
 
-    def test_artist_cap_respected_across_all_novelty_levels(self, novelty_gradient_tracks):
+    def test_artist_cap_respected_across_all_novelty_levels(
+        self, novelty_gradient_tracks
+    ):
         if not API_KEY:
             return
         t0, t5, t1 = novelty_gradient_tracks

@@ -8,6 +8,8 @@ class StreamingLinks:
     preview: Optional[str]
     youtube_video_id: Optional[str]
     spotify: str
+    # {"small": url, "medium": url, "large": url} (100/300/600px) or None
+    artwork: Optional[dict] = None
 
 
 @dataclass
@@ -58,6 +60,7 @@ class Track:
                 "preview": self.streaming.preview,
                 "youtubeVideoId": self.streaming.youtube_video_id,
                 "spotify": self.streaming.spotify,
+                "artwork": self.streaming.artwork,
             },
             "relevanceScore": self.relevance_score,
             "noveltyScore": self.novelty_score,

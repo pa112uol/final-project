@@ -225,6 +225,7 @@ async def _enrich_track(track: dict) -> dict:
             "preview": streaming.preview,
             "youtubeVideoId": streaming.youtube_video_id,
             "spotify": streaming.spotify,
+            "artwork": streaming.artwork,
         },
     }
 

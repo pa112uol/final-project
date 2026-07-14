@@ -15,6 +15,8 @@ _CLIENT = dict(
     limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
 )
 
+_ARTWORK_SIZES = {"small": 100, "medium": 300, "large": 600}
+
 
 def _force_https(url: str = None) -> str:
     if not url:
@@ -22,24 +24,42 @@ def _force_https(url: str = None) -> str:
     return url.replace("http://", "https://", 1)
 
 
+def _artwork_urls(url: str = None) -> dict | None:
+    url = _force_https(url)
+    if not url:
+        return None
+    return {
+        name: url.replace("100x100bb", f"{px}x{px}bb")
+        for name, px in _ARTWORK_SIZES.items()
+    }
+
+
+_ITUNES_EMPTY = {"apple_music": None, "preview": None, "artwork": None}
+
+
 async def _fetch_itunes_links(artist: str, title: str) -> dict:
     try:
         res = await get_client("streaming", **_CLIENT).get(
             ITUNES_BASE,
-            params={"term": f"{artist} {title}", "entity": "song", "limit": "1"},
+            params={
+                "term": f"{artist} {title}",
+                "entity": "song",
+                "limit": "1",
+            },
         )
         if not res.is_success:
-            return {"apple_music": None, "preview": None}
+            return dict(_ITUNES_EMPTY)
         data = res.json()
         item = (data.get("results") or [None])[0]
         if not item:
-            return {"apple_music": None, "preview": None}
+            return dict(_ITUNES_EMPTY)
         return {
             "apple_music": _force_https(item.get("trackViewUrl")),
             "preview": _force_https(item.get("previewUrl")),
+            "artwork": _artwork_urls(item.get("artworkUrl100")),
         }
     except Exception:
-        return {"apple_music": None, "preview": None}
+        return dict(_ITUNES_EMPTY)
 
 
 async def _fetch_youtube_video_id(artist: str, title: str) -> str:
@@ -82,4 +102,5 @@ async def get_streaming_links(artist: str, title: str):
         preview=itunes["preview"],
         youtube_video_id=youtube_video_id,
         spotify=f"https://open.spotify.com/search/{query}",
+        artwork=itunes.get("artwork"),
     )

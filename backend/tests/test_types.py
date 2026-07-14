@@ -42,9 +42,17 @@ class TestTrackToDict:
     def test_contains_all_required_top_level_keys(self):
         d = make_track().to_dict()
         for key in (
-            "mbid", "title", "artist", "artistMbid", "durationMs",
-            "firstReleaseDate", "releases", "streaming",
-            "relevanceScore", "noveltyScore", "tags",
+            "mbid",
+            "title",
+            "artist",
+            "artistMbid",
+            "durationMs",
+            "firstReleaseDate",
+            "releases",
+            "streaming",
+            "relevanceScore",
+            "noveltyScore",
+            "tags",
         ):
             assert key in d, f"missing key: {key}"
 
@@ -65,11 +73,19 @@ class TestTrackToDict:
 
     def test_streaming_dict_has_camel_case_keys(self):
         d = make_track().to_dict()
-        for key in ("appleMusic", "preview", "youtubeVideoId", "spotify"):
+        for key in (
+            "appleMusic",
+            "preview",
+            "youtubeVideoId",
+            "spotify",
+            "artwork",
+        ):
             assert key in d["streaming"], f"missing streaming key: {key}"
 
     def test_streaming_values_match_input(self):
-        sl = make_streaming(apple_music="https://music.apple.com/x", youtube_video_id="yt999")
+        sl = make_streaming(
+            apple_music="https://music.apple.com/x", youtube_video_id="yt999"
+        )
         d = make_track(streaming=sl).to_dict()
         assert d["streaming"]["appleMusic"] == "https://music.apple.com/x"
         assert d["streaming"]["youtubeVideoId"] == "yt999"
@@ -77,7 +93,9 @@ class TestTrackToDict:
     def test_release_objects_serialized_as_dicts(self):
         releases = [Release(mbid="rel1", title="Pablo Honey", date="1993")]
         d = make_track(releases=releases).to_dict()
-        assert d["releases"] == [{"mbid": "rel1", "title": "Pablo Honey", "date": "1993"}]
+        assert d["releases"] == [
+            {"mbid": "rel1", "title": "Pablo Honey", "date": "1993"}
+        ]
 
     def test_release_dicts_passed_through_unchanged(self):
         releases = [{"mbid": "rel1", "title": "Pablo Honey", "date": "1993"}]
@@ -91,8 +109,16 @@ class TestTrackToDict:
         ]
         d = make_track(releases=releases).to_dict()
         assert len(d["releases"]) == 2
-        assert d["releases"][0] == {"mbid": "rel1", "title": "Pablo Honey", "date": "1993"}
-        assert d["releases"][1] == {"mbid": "rel2", "title": "The Bends", "date": "1995"}
+        assert d["releases"][0] == {
+            "mbid": "rel1",
+            "title": "Pablo Honey",
+            "date": "1993",
+        }
+        assert d["releases"][1] == {
+            "mbid": "rel2",
+            "title": "The Bends",
+            "date": "1995",
+        }
 
     def test_tags_preserved(self):
         d = make_track(tags=["rock", "alternative", "indie"]).to_dict()
@@ -104,7 +130,9 @@ class TestTrackToDict:
         assert d["firstReleaseDate"] is None
 
     def test_none_streaming_urls_preserved(self):
-        sl = make_streaming(apple_music=None, preview=None, youtube_video_id=None)
+        sl = make_streaming(
+            apple_music=None, preview=None, youtube_video_id=None
+        )
         d = make_track(streaming=sl).to_dict()
         assert d["streaming"]["appleMusic"] is None
         assert d["streaming"]["preview"] is None

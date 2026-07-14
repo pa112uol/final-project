@@ -117,6 +117,10 @@ def _build_query(q: str) -> str:
     q = _FEAT_RE.sub("", q).strip()
 
     artist, title = _parse_artist_track(q)
+    return _build_field_query(artist, title)
+
+
+def _build_field_query(artist: str | None, title: str) -> str:
     esc_title = _escape_mb(title)
 
     # If artis is present, search for recordings with the given title and artist name,
@@ -189,12 +193,19 @@ async def search_tracks(q: str) -> list:
     cleaned = _clean(q)
     if not cleaned:
         return []
+    q_artist, q_title = _parse_artist_track(_FEAT_RE.sub("", cleaned).strip())
+    return await search_tracks_fields(q_title, q_artist)
 
-    lucene_query = _build_query(cleaned)
+
+# Resolve a canonical MBID for a track using the title and artist to search
+async def search_tracks_fields(title: str, artist: str | None = None) -> list:
+    q_title = _FEAT_RE.sub("", _clean(title)).strip() if title else ""
+    q_artist = _FEAT_RE.sub("", _clean(artist)).strip() if artist else None
+    if not q_title:
+        return []
+
+    lucene_query = _build_field_query(q_artist, q_title)
     logger.debug("MB search query: %s", lucene_query)
-
-    q_artist, q_title = _parse_artist_track(cleaned)
-    q_title = _FEAT_RE.sub("", q_title).strip()
 
     try:
         res = await get_client(
@@ -278,27 +289,15 @@ async def search_tracks(q: str) -> list:
     return results[:10]
 
 
+# Resolve a canonical MBID for a track, using the title and artist to search
+# if the given MBID is not valid or missing. This helps to handle cases
+# where the MBID might be incorrect (e.g. from Last.fm)
 async def resolve_canonical_mbid(
     mbid: str, title: str | None = None, artist: str | None = None
 ) -> str:
-    if mbid:
-        try:
-            res = await get_client(
-                "mb-search", timeout=10, follow_redirects=True
-            ).get(f"{MB_BASE}/recording/{mbid}", params={"fmt": "json"})
-            if res.is_success:
-                data = res.json()
-                return data.get("id", mbid)
-        except Exception:
-            pass
-
-    # The direct id lookup failed (stale/merged/nonexistent mbid) or there
-    # was no mbid at all; fall back to searching by whatever title/artist
-    # data the caller does have and take the best-scoring match.
     if title:
-        query = f"{artist} - {title}" if artist else title
         try:
-            results = await search_tracks(query)
+            results = await search_tracks_fields(title, artist)
         except Exception:
             results = []
         if results:

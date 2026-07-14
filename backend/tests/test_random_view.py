@@ -59,6 +59,7 @@ def _streaming():
         preview=None,
         youtube_video_id="yt123",
         spotify="https://open.spotify.com/track/test",
+        artwork=None,
     )
 
 
@@ -141,7 +142,8 @@ class TestRandomEndpoint:
 
     def test_returns_502_when_mb_fails(self, rf):
         with patch(
-            "clients.musicbrainz.mb_fetch", new=AsyncMock(return_value=_mb_error())
+            "clients.musicbrainz.mb_fetch",
+            new=AsyncMock(return_value=_mb_error()),
         ):
             response = random_tracks(rf.get("/api/random/"))
 

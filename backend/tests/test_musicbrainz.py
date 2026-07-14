@@ -11,7 +11,9 @@ from clients.musicbrainz import (
 )
 
 
-def _make_recording(mbid="mbid1", title="Track", artist="Artist", score=100, releases=None):
+def _make_recording(
+    mbid="mbid1", title="Track", artist="Artist", score=100, releases=None
+):
     rec = {
         "id": mbid,
         "title": title,
@@ -35,7 +37,9 @@ def _make_response(recordings=None, success=True, status_code=200):
     resp = MagicMock()
     resp.is_success = success
     resp.status_code = status_code
-    resp.json.return_value = {"recordings": recordings if recordings is not None else []}
+    resp.json.return_value = {
+        "recordings": recordings if recordings is not None else []
+    }
     return resp
 
 
@@ -58,10 +62,15 @@ class TestClean:
         assert _clean('"Stairway to Heaven"') == "Stairway to Heaven"
 
     def test_strips_official_video_suffix(self):
-        assert _clean("Bohemian Rhapsody (Official Video)") == "Bohemian Rhapsody"
+        assert (
+            _clean("Bohemian Rhapsody (Official Video)") == "Bohemian Rhapsody"
+        )
 
     def test_strips_official_music_video_suffix(self):
-        assert _clean("Smells Like Teen Spirit (Official Music Video)") == "Smells Like Teen Spirit"
+        assert (
+            _clean("Smells Like Teen Spirit (Official Music Video)")
+            == "Smells Like Teen Spirit"
+        )
 
     def test_strips_lyrics_suffix(self):
         assert _clean("Wonderwall (Lyrics)") == "Wonderwall"
@@ -118,12 +127,16 @@ class TestParseArtistTrack:
         assert track == "Bohemian Rhapsody"
 
     def test_dash_separator_multi_word_artist(self):
-        artist, track = _parse_artist_track("The Rolling Stones - Paint It Black")
+        artist, track = _parse_artist_track(
+            "The Rolling Stones - Paint It Black"
+        )
         assert artist == "The Rolling Stones"
         assert track == "Paint It Black"
 
     def test_dash_separator_multi_word_both(self):
-        artist, track = _parse_artist_track("Red Hot Chili Peppers - Californication")
+        artist, track = _parse_artist_track(
+            "Red Hot Chili Peppers - Californication"
+        )
         assert artist == "Red Hot Chili Peppers"
         assert track == "Californication"
 
@@ -133,12 +146,16 @@ class TestParseArtistTrack:
         assert track == "Wonderwall"
 
     def test_by_separator_greedy_handles_by_in_track_name(self):
-        artist, track = _parse_artist_track("By The Way by Red Hot Chili Peppers")
+        artist, track = _parse_artist_track(
+            "By The Way by Red Hot Chili Peppers"
+        )
         assert artist == "Red Hot Chili Peppers"
         assert track == "By The Way"
 
     def test_by_case_insensitive(self):
-        artist, track = _parse_artist_track("Smells Like Teen Spirit BY Nirvana")
+        artist, track = _parse_artist_track(
+            "Smells Like Teen Spirit BY Nirvana"
+        )
         assert artist == "Nirvana"
         assert track == "Smells Like Teen Spirit"
 
@@ -151,6 +168,7 @@ class TestParseArtistTrack:
         artist, track = _parse_artist_track("Nirvana")
         assert artist is None
         assert track == "Nirvana"
+
 
 class TestBuildQuery:
     def test_dash_query_uses_artistname_field(self):
@@ -208,7 +226,7 @@ class TestBuildQuery:
         q = _build_query("radiohead")
         assert 'artistname:"radiohead"' in q
         # The branch must exclude title matches so "Wonderwall" beats "Oasis #1"
-        assert '-recording:(radiohead~)' in q
+        assert "-recording:(radiohead~)" in q
 
     def test_exact_artist_branch_absent_for_multi_word(self):
         # Multi-word queries like "bohemian rhapsody" skip the exact artist branch
@@ -259,8 +277,14 @@ class TestSearchTracks:
 
     async def test_skips_recording_with_no_mbid(self):
         recs = [
-            {"title": "Song", "artist-credit": [{"name": "Artist"}], "score": 90},
-            _make_recording(mbid="good", title="Other", artist="Artist", score=80),
+            {
+                "title": "Song",
+                "artist-credit": [{"name": "Artist"}],
+                "score": 90,
+            },
+            _make_recording(
+                mbid="good", title="Other", artist="Artist", score=80
+            ),
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("Artist")
@@ -269,8 +293,12 @@ class TestSearchTracks:
 
     async def test_deduplicates_by_mbid(self):
         recs = [
-            _make_recording(mbid="dup", title="Song", artist="Artist", score=90),
-            _make_recording(mbid="dup", title="Song", artist="Artist", score=80),
+            _make_recording(
+                mbid="dup", title="Song", artist="Artist", score=90
+            ),
+            _make_recording(
+                mbid="dup", title="Song", artist="Artist", score=80
+            ),
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("Artist - Song")
@@ -279,8 +307,12 @@ class TestSearchTracks:
     async def test_deduplicates_by_title_artist(self):
         # Same logical track, different mbids - second should be skipped
         recs = [
-            _make_recording(mbid="id1", title="Song", artist="Artist", score=90),
-            _make_recording(mbid="id2", title="Song", artist="Artist", score=85),
+            _make_recording(
+                mbid="id1", title="Song", artist="Artist", score=90
+            ),
+            _make_recording(
+                mbid="id2", title="Song", artist="Artist", score=85
+            ),
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("Artist - Song")
@@ -288,16 +320,27 @@ class TestSearchTracks:
         assert results[0]["mbid"] == "id1"
 
     async def test_limits_to_10_results(self):
-        recs = [_make_recording(mbid=str(i), title=f"Song {i}", artist=f"Artist {i}", score=100) for i in range(20)]
+        recs = [
+            _make_recording(
+                mbid=str(i), title=f"Song {i}", artist=f"Artist {i}", score=100
+            )
+            for i in range(20)
+        ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("Song")
         assert len(results) == 10
 
     async def test_results_sorted_by_score_descending(self):
         recs = [
-            _make_recording(mbid="exact", title="Creep", artist="Radiohead", score=99),
-            _make_recording(mbid="partial", title="Creepy", artist="Other", score=75),
-            _make_recording(mbid="weak", title="Creeper", artist="Band", score=50),
+            _make_recording(
+                mbid="exact", title="Creep", artist="Radiohead", score=99
+            ),
+            _make_recording(
+                mbid="partial", title="Creepy", artist="Other", score=75
+            ),
+            _make_recording(
+                mbid="weak", title="Creeper", artist="Band", score=50
+            ),
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("Radiohead - Creep")
@@ -309,27 +352,46 @@ class TestSearchTracks:
         # Searching just an artist name must surface that artist's songs even
         # when the track title contains none of the query words.
         recs = [
-            _make_recording(mbid="by-artist", title="Creep", artist="Radiohead", score=81),
-            _make_recording(mbid="titled", title="Radiohead", artist="Other Band", score=90),
+            _make_recording(
+                mbid="by-artist", title="Creep", artist="Radiohead", score=81
+            ),
+            _make_recording(
+                mbid="titled", title="Radiohead", artist="Other Band", score=90
+            ),
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("radiohead")
         mbids = [r["mbid"] for r in results]
-        assert "by-artist" in mbids, "Artist-name query must surface tracks BY that artist"
+        assert (
+            "by-artist" in mbids
+        ), "Artist-name query must surface tracks BY that artist"
 
     async def test_artist_only_title_match_ranks_above_artist_match(self):
         # A recording whose title matches the query should rank above one that
         # only matches via the artist name (0.75 penalty on artist path).
         recs = [
-            _make_recording(mbid="title-match", title="Nirvana", artist="Other", score=90),
-            _make_recording(mbid="artist-match", title="Smells Like Teen Spirit", artist="Nirvana", score=81),
+            _make_recording(
+                mbid="title-match", title="Nirvana", artist="Other", score=90
+            ),
+            _make_recording(
+                mbid="artist-match",
+                title="Smells Like Teen Spirit",
+                artist="Nirvana",
+                score=81,
+            ),
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("nirvana")
         assert len(results) >= 2
-        title_pos = next(i for i, r in enumerate(results) if r["mbid"] == "title-match")
-        artist_pos = next(i for i, r in enumerate(results) if r["mbid"] == "artist-match")
-        assert title_pos < artist_pos, "Title match should rank above pure artist match"
+        title_pos = next(
+            i for i, r in enumerate(results) if r["mbid"] == "title-match"
+        )
+        artist_pos = next(
+            i for i, r in enumerate(results) if r["mbid"] == "artist-match"
+        )
+        assert (
+            title_pos < artist_pos
+        ), "Title match should rank above pure artist match"
 
     async def test_self_referential_recording_penalised(self):
         # Interviews/compilations with the band name embedded in a longer title
@@ -337,22 +399,36 @@ class TestSearchTracks:
         # than a proper song by the same artist that lacks the band name in title.
         recs = [
             # Self-referential: "radiohead" in artist AND in a long title => penalised
-            _make_recording(mbid="interview", title="Interview: There Must Be Another Radiohead",
-                            artist="Radiohead", score=90),
+            _make_recording(
+                mbid="interview",
+                title="Interview: There Must Be Another Radiohead",
+                artist="Radiohead",
+                score=90,
+            ),
             # Proper song: "radiohead" only in artist, not in title => not penalised
-            _make_recording(mbid="song", title="Creep", artist="Radiohead", score=81),
+            _make_recording(
+                mbid="song", title="Creep", artist="Radiohead", score=81
+            ),
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("radiohead")
         assert len(results) == 2
         song_pos = next(i for i, r in enumerate(results) if r["mbid"] == "song")
-        interview_pos = next(i for i, r in enumerate(results) if r["mbid"] == "interview")
-        assert song_pos < interview_pos, "Proper song must rank above self-referential interview"
+        interview_pos = next(
+            i for i, r in enumerate(results) if r["mbid"] == "interview"
+        )
+        assert (
+            song_pos < interview_pos
+        ), "Proper song must rank above self-referential interview"
 
     async def test_self_titled_song_not_penalised(self):
         # A self-titled song ("Oasis - Oasis") has the same word count as
         # the query, so the ≥q_words+2 guard prevents the penalty from firing.
-        recs = [_make_recording(mbid="self-titled", title="Oasis", artist="Oasis", score=90)]
+        recs = [
+            _make_recording(
+                mbid="self-titled", title="Oasis", artist="Oasis", score=90
+            )
+        ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("oasis")
         # Should not be penalised; score must be above the base level for a
@@ -367,7 +443,12 @@ class TestSearchTracks:
         assert results[0]["artist"] == ""
 
     async def test_none_artist_credit_yields_empty_artist(self):
-        rec = {"id": "abc", "title": "Track", "artist-credit": None, "score": 70}
+        rec = {
+            "id": "abc",
+            "title": "Track",
+            "artist-credit": None,
+            "score": 70,
+        }
         with _patch_client(_make_response([rec])):
             results = await search_tracks("Track")
         assert results[0]["artist"] == ""
@@ -380,7 +461,9 @@ class TestSearchTracks:
             results = await search_tracks("anything")
         assert results == []
 
-    async def test_returns_album_title_and_release_type_from_first_release(self):
+    async def test_returns_album_title_and_release_type_from_first_release(
+        self,
+    ):
         release = _make_release(title="OK Computer", release_type="Album")
         rec = _make_recording(releases=[release])
         with _patch_client(_make_response([rec])):
@@ -403,7 +486,9 @@ class TestSearchTracks:
             results = await search_tracks("Track")
         assert results[0]["year"] == "1997"
 
-    async def test_year_falls_back_to_release_date_when_no_first_release_date(self):
+    async def test_year_falls_back_to_release_date_when_no_first_release_date(
+        self,
+    ):
         release = _make_release(date="1997-05-21")
         rec = _make_recording(releases=[release])
         with _patch_client(_make_response([rec])):
@@ -419,7 +504,10 @@ class TestSearchTracks:
         assert results[0]["year"] is None
 
     async def test_year_none_when_date_missing(self):
-        release = {"title": "Some Album", "release-group": {"primary-type": "Album"}}
+        release = {
+            "title": "Some Album",
+            "release-group": {"primary-type": "Album"},
+        }
         rec = _make_recording(releases=[release])
         with _patch_client(_make_response([rec])):
             results = await search_tracks("Track")
@@ -427,60 +515,31 @@ class TestSearchTracks:
 
 
 class TestResolveCanonicalMbid:
-    async def test_returns_canonical_id_from_response(self):
-        resp = MagicMock()
-        resp.is_success = True
-        resp.json.return_value = {"id": "canonical-id"}
-        mock_client = MagicMock()
-        mock_client.get = AsyncMock(return_value=resp)
-        with patch("clients.musicbrainz.get_client", return_value=mock_client):
-            result = await resolve_canonical_mbid("original-id")
-        assert result == "canonical-id"
-
-    async def test_http_failure_returns_original_mbid(self):
-        resp = MagicMock()
-        resp.is_success = False
-        mock_client = MagicMock()
-        mock_client.get = AsyncMock(return_value=resp)
-        with patch("clients.musicbrainz.get_client", return_value=mock_client):
-            result = await resolve_canonical_mbid("original-id")
-        assert result == "original-id"
-
-    async def test_exception_returns_original_mbid(self):
-        mock_client = MagicMock()
-        mock_client.get = AsyncMock(side_effect=Exception("timeout"))
-        with patch("clients.musicbrainz.get_client", return_value=mock_client):
-            result = await resolve_canonical_mbid("original-id")
-        assert result == "original-id"
-
-    async def test_missing_id_key_returns_original_mbid(self):
-        resp = MagicMock()
-        resp.is_success = True
-        resp.json.return_value = {}
-        mock_client = MagicMock()
-        mock_client.get = AsyncMock(return_value=resp)
-        with patch("clients.musicbrainz.get_client", return_value=mock_client):
-            result = await resolve_canonical_mbid("original-id")
-        assert result == "original-id"
-
-
-class TestResolveCanonicalMbidSearchFallback:
-    async def test_falls_back_to_search_when_id_lookup_fails(self):
-        id_lookup_resp = _make_response(success=False, status_code=404)
+    async def test_resolves_by_search_ignoring_given_mbid(self):
         search_resp = _make_response(
-            [_make_recording(mbid="found-id", title="Bohemian Rhapsody", artist="Queen")]
+            [
+                _make_recording(
+                    mbid="found-id", title="Bohemian Rhapsody", artist="Queen"
+                )
+            ]
         )
         mock_client = MagicMock()
-        mock_client.get = AsyncMock(side_effect=[id_lookup_resp, search_resp])
+        mock_client.get = AsyncMock(return_value=search_resp)
         with patch("clients.musicbrainz.get_client", return_value=mock_client):
             result = await resolve_canonical_mbid(
-                "dead-id", "Bohemian Rhapsody", "Queen"
+                "stale-id", "Bohemian Rhapsody", "Queen"
             )
         assert result == "found-id"
+        assert mock_client.get.call_count == 1
+        assert "stale-id" not in mock_client.get.call_args.args[0]
 
-    async def test_falls_back_to_search_when_no_mbid_provided(self):
+    async def test_resolves_by_search_when_no_mbid_provided(self):
         search_resp = _make_response(
-            [_make_recording(mbid="found-id", title="Creep", artist="Radiohead")]
+            [
+                _make_recording(
+                    mbid="found-id", title="Creep", artist="Radiohead"
+                )
+            ]
         )
         mock_client = MagicMock()
         mock_client.get = AsyncMock(return_value=search_resp)
@@ -490,24 +549,41 @@ class TestResolveCanonicalMbidSearchFallback:
         assert mock_client.get.call_count == 1
 
     async def test_returns_original_mbid_when_search_finds_nothing(self):
-        id_lookup_resp = _make_response(success=False, status_code=404)
         search_resp = _make_response([])
         mock_client = MagicMock()
-        mock_client.get = AsyncMock(side_effect=[id_lookup_resp, search_resp])
+        mock_client.get = AsyncMock(return_value=search_resp)
         with patch("clients.musicbrainz.get_client", return_value=mock_client):
             result = await resolve_canonical_mbid(
-                "dead-id", "Some Obscure Track", "Some Artist"
+                "original-id", "Some Obscure Track", "Some Artist"
             )
-        assert result == "dead-id"
+        assert result == "original-id"
 
-    async def test_does_not_search_when_no_title_given(self):
-        id_lookup_resp = _make_response(success=False, status_code=404)
+    async def test_returns_original_mbid_when_search_http_fails(self):
+        search_resp = _make_response(success=False, status_code=503)
         mock_client = MagicMock()
-        mock_client.get = AsyncMock(return_value=id_lookup_resp)
+        mock_client.get = AsyncMock(return_value=search_resp)
         with patch("clients.musicbrainz.get_client", return_value=mock_client):
-            result = await resolve_canonical_mbid("dead-id")
-        assert result == "dead-id"
-        assert mock_client.get.call_count == 1
+            result = await resolve_canonical_mbid(
+                "original-id", "Bohemian Rhapsody", "Queen"
+            )
+        assert result == "original-id"
+
+    async def test_returns_original_mbid_when_search_raises(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=Exception("timeout"))
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            result = await resolve_canonical_mbid(
+                "original-id", "Bohemian Rhapsody", "Queen"
+            )
+        assert result == "original-id"
+
+    async def test_no_request_when_no_title_given(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock()
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            result = await resolve_canonical_mbid("original-id")
+        assert result == "original-id"
+        assert mock_client.get.call_count == 0
 
 
 def make_mb_resp(artists, success=True):
@@ -519,17 +595,26 @@ def make_mb_resp(artists, success=True):
 
 class TestResolveArtistMbid:
     async def test_returns_artist_id_when_score_above_threshold(self):
-        with patch("clients.musicbrainz.mb_fetch", new=make_mb_resp([{"id": "abc-123", "score": 95}])):
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=make_mb_resp([{"id": "abc-123", "score": 95}]),
+        ):
             result = await resolve_artist_mbid("Radiohead")
         assert result == "abc-123"
 
     async def test_returns_artist_id_when_score_exactly_85(self):
-        with patch("clients.musicbrainz.mb_fetch", new=make_mb_resp([{"id": "abc-123", "score": 85}])):
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=make_mb_resp([{"id": "abc-123", "score": 85}]),
+        ):
             result = await resolve_artist_mbid("Radiohead")
         assert result == "abc-123"
 
     async def test_returns_empty_when_score_below_85(self):
-        with patch("clients.musicbrainz.mb_fetch", new=make_mb_resp([{"id": "abc-123", "score": 84}])):
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=make_mb_resp([{"id": "abc-123", "score": 84}]),
+        ):
             result = await resolve_artist_mbid("Unknown Band")
         assert result == ""
 
@@ -541,12 +626,17 @@ class TestResolveArtistMbid:
     async def test_returns_empty_on_http_failure(self):
         resp = MagicMock()
         resp.is_success = False
-        with patch("clients.musicbrainz.mb_fetch", new=AsyncMock(return_value=resp)):
+        with patch(
+            "clients.musicbrainz.mb_fetch", new=AsyncMock(return_value=resp)
+        ):
             result = await resolve_artist_mbid("Artist")
         assert result == ""
 
     async def test_returns_empty_on_exception(self):
-        with patch("clients.musicbrainz.mb_fetch", new=AsyncMock(side_effect=Exception("timeout"))):
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=AsyncMock(side_effect=Exception("timeout")),
+        ):
             result = await resolve_artist_mbid("Artist")
         assert result == ""
 
@@ -555,7 +645,9 @@ class TestResolveArtistMbid:
         with patch("clients.musicbrainz.mb_fetch", new=mock_fetch):
             await resolve_artist_mbid('AC"DC')
         url = mock_fetch.call_args[0][0]
-        assert '"' not in url.split("query=")[1].split("&")[0].replace('artist:"', "").replace('"', "")
+        assert '"' not in url.split("query=")[1].split("&")[0].replace(
+            'artist:"', ""
+        ).replace('"', "")
 
     async def test_uses_first_artist_in_response(self):
         artists = [
@@ -567,6 +659,9 @@ class TestResolveArtistMbid:
         assert result == "first-id"
 
     async def test_missing_score_treated_as_zero(self):
-        with patch("clients.musicbrainz.mb_fetch", new=make_mb_resp([{"id": "abc-123"}])):
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=make_mb_resp([{"id": "abc-123"}]),
+        ):
             result = await resolve_artist_mbid("Artist")
         assert result == ""
