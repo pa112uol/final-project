@@ -112,14 +112,6 @@ def _parse_artist_track(q: str) -> tuple[str | None, str]:
     return None, q.strip()
 
 
-def _build_query(q: str) -> str:
-    q = _clean(q)
-    q = _FEAT_RE.sub("", q).strip()
-
-    artist, title = _parse_artist_track(q)
-    return _build_field_query(artist, title)
-
-
 def _build_field_query(artist: str | None, title: str) -> str:
     esc_title = _escape_mb(title)
 

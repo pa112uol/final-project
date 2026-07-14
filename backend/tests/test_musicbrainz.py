@@ -4,7 +4,7 @@ from clients.musicbrainz import (
     _clean,
     _escape_mb,
     _parse_artist_track,
-    _build_query,
+    _build_field_query,
     search_tracks,
     resolve_canonical_mbid,
     resolve_artist_mbid,
@@ -170,73 +170,59 @@ class TestParseArtistTrack:
         assert track == "Nirvana"
 
 
-class TestBuildQuery:
-    def test_dash_query_uses_artistname_field(self):
-        q = _build_query("Queen - Bohemian Rhapsody")
+class TestBuildFieldQuery:
+    def test_with_artist_uses_artistname_field(self):
+        q = _build_field_query("Queen", "Bohemian Rhapsody")
         assert "artistname:" in q
         assert "Bohemian Rhapsody" in q
         assert "Queen" in q
 
-    def test_dash_query_includes_reversed_ordering(self):
+    def test_with_artist_includes_reversed_ordering(self):
         # Both names should appear in phrase positions for correct + reversed branches
-        q = _build_query("Queen - Bohemian Rhapsody")
+        q = _build_field_query("Queen", "Bohemian Rhapsody")
         assert q.count('"Bohemian Rhapsody"') >= 1
         assert q.count('"Queen"') >= 1
         assert " OR " in q
 
-    def test_plain_query_has_phrase_and_recording_branches(self):
-        q = _build_query("Bohemian Rhapsody")
+    def test_no_artist_has_phrase_and_recording_branches(self):
+        q = _build_field_query(None, "Bohemian Rhapsody")
         assert 'recording:("Bohemian Rhapsody")' in q
         assert "recording:" in q
 
-    def test_plain_query_includes_phrase(self):
-        q = _build_query("bohemian rhapsody")
+    def test_no_artist_includes_phrase(self):
+        q = _build_field_query(None, "bohemian rhapsody")
         assert '"bohemian rhapsody"' in q
 
-    def test_plain_query_always_fuzzy(self):
-        # Fuzzy search always applied for plain queries regardless of word count
-        for query in ["teen spirit", "the sound of silence simon garfunkel"]:
-            assert "~" in _build_query(query)
-
-    def test_by_separator_swaps_artist_and_track(self):
-        q = _build_query("Bohemian Rhapsody by Queen")
-        assert "Queen" in q
-        assert "Bohemian Rhapsody" in q
-        assert "artistname:" in q
-
-    def test_feat_stripped_from_track(self):
-        q = _build_query("Queen - Bohemian Rhapsody feat. David Bowie")
-        assert "David Bowie" not in q
-
-    def test_feat_stripped_from_plain_query(self):
-        q = _build_query("Bohemian Rhapsody feat. David Bowie")
-        assert "David Bowie" not in q
+    def test_no_artist_always_fuzzy(self):
+        # Fuzzy search always applied when there's no artist, regardless of word count
+        for title in ["teen spirit", "the sound of silence simon garfunkel"]:
+            assert "~" in _build_field_query(None, title)
 
     def test_special_chars_escaped(self):
-        q = _build_query("(What's The Story) Morning Glory")
+        q = _build_field_query(None, "(What's The Story) Morning Glory")
         assert "\\(" in q or '"' in q
 
     def test_single_word_includes_fuzzy(self):
-        q = _build_query("nirvana")
+        q = _build_field_query(None, "nirvana")
         assert "~" in q
 
-    def test_plain_query_includes_exact_artist_branch(self):
-        # The NOT-title artist branch lets "radiohead" (artist-only query) surface
-        # recordings whose titles don't contain the artist name ("Creep")
-        q = _build_query("radiohead")
+    def test_no_artist_includes_exact_artist_branch_for_single_word(self):
+        # The NOT-title artist branch lets a single-word title ("radiohead")
+        # surface recordings whose titles don't contain that word ("Creep")
+        q = _build_field_query(None, "radiohead")
         assert 'artistname:"radiohead"' in q
         # The branch must exclude title matches so "Wonderwall" beats "Oasis #1"
         assert "-recording:(radiohead~)" in q
 
     def test_exact_artist_branch_absent_for_multi_word(self):
-        # Multi-word queries like "bohemian rhapsody" skip the exact artist branch
+        # Multi-word titles like "bohemian rhapsody" skip the exact artist branch
         # because multi-word phrases are almost always song titles and there may
         # be an obscure band with that exact name that would flood results.
-        q = _build_query("bohemian rhapsody")
+        q = _build_field_query(None, "bohemian rhapsody")
         assert 'artistname:"bohemian rhapsody"' not in q
 
     def test_output_is_non_empty_string(self):
-        q = _build_query("any query")
+        q = _build_field_query(None, "any query")
         assert isinstance(q, str) and len(q) > 0
 
 
