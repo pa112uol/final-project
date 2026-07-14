@@ -23,7 +23,9 @@ def make_clients(**overrides):
                 {"name": "dreampop", "count": 60},
             ]
 
-        async def fetch_track_tags_only(self, title, artist, api_key, mbid=None):
+        async def fetch_track_tags_only(
+            self, title, artist, api_key, mbid=None
+        ):
             return []
 
         async def fetch_tag_artists(self, tag, page, limit, api_key):
@@ -32,7 +34,9 @@ def make_clients(**overrides):
                 {"name": "Ride", "mbid": "mbid-ride"},
             ]
 
-        async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
+        async def fetch_top_recordings_for_artist(
+            self, mbid, name, limit, api_key
+        ):
             tracks = {
                 "mbid-slowdive": [
                     {
@@ -74,7 +78,7 @@ def make_clients(**overrides):
         async def fetch_artist_popularity(self, mbids):
             return {}
 
-        async def resolve_final_mbid(self, mbid, title, artist):
+        async def resolve_recording_mbid(self, mbid, title, artist):
             return mbid
 
         async def get_streaming_links(self, artist, title):
@@ -86,7 +90,9 @@ def make_clients(**overrides):
     return clients
 
 
-TEST_SEED = Seed(mbid="seed-mbid-1", title="souvlaki space station", artist="slowdive")
+TEST_SEED = Seed(
+    mbid="seed-mbid-1", title="souvlaki space station", artist="slowdive"
+)
 
 
 class TestRunPipeline:
@@ -115,13 +121,17 @@ class TestRunPipeline:
             async def fetch_track_tags(self, title, artist, api_key, mbid=None):
                 return []
 
-            async def fetch_track_tags_only(self, title, artist, api_key, mbid=None):
+            async def fetch_track_tags_only(
+                self, title, artist, api_key, mbid=None
+            ):
                 return []
 
             async def fetch_tag_artists(self, tag, page, limit, api_key):
                 return []
 
-            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
+            async def fetch_top_recordings_for_artist(
+                self, mbid, name, limit, api_key
+            ):
                 return []
 
             async def resolve_artist_mbid(self, name):
@@ -130,18 +140,22 @@ class TestRunPipeline:
             async def fetch_artist_popularity(self, mbids):
                 return {}
 
-            async def resolve_final_mbid(self, mbid, title, artist):
+            async def resolve_recording_mbid(self, mbid, title, artist):
                 return mbid
 
             async def get_streaming_links(self, artist, title):
                 return make_streaming()
 
-        tracks = await run_pipeline([TEST_SEED], "fake-api-key", None, 0, EmptyTagClients())
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, EmptyTagClients()
+        )
         assert tracks == []
 
     async def test_excludes_the_seed_track_itself_from_results(self):
         class SeedIncludedClients(make_clients().__class__):
-            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
+            async def fetch_top_recordings_for_artist(
+                self, mbid, name, limit, api_key
+            ):
                 return [
                     {
                         "mbid": "seed-track-rec",
@@ -178,12 +192,18 @@ class TestRunPipeline:
 
         clients = make_clients()
         clients.get_streaming_links = get_streaming_links
-        tracks = await run_pipeline([TEST_SEED], "fake-api-key", None, 0, clients)
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, clients
+        )
         assert len(calls) == len(tracks)
 
-    async def test_applies_mood_boost_happy_candidates_outrank_equal_non_happy(self):
+    async def test_applies_mood_boost_happy_candidates_outrank_equal_non_happy(
+        self,
+    ):
         class MoodClients(make_clients().__class__):
-            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
+            async def fetch_top_recordings_for_artist(
+                self, mbid, name, limit, api_key
+            ):
                 return [
                     {
                         "mbid": "rec-happy",
@@ -217,11 +237,15 @@ class TestRunPipeline:
         if happy_idx != -1 and neutral_idx != -1:
             assert happy_idx < neutral_idx
 
-    async def test_mood_boost_fires_via_lf_tags_when_lb_recording_tags_contain_no_mood_words(self):
+    async def test_mood_boost_fires_via_lf_tags_when_lb_recording_tags_contain_no_mood_words(
+        self,
+    ):
         # This is the scenario where LB tags are pure genre labels; mood words come
         # only from LF enrichment.
         class MoodEnrichClients(make_clients().__class__):
-            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
+            async def fetch_top_recordings_for_artist(
+                self, mbid, name, limit, api_key
+            ):
                 return [
                     {
                         "mbid": "rec-chill",
@@ -243,7 +267,9 @@ class TestRunPipeline:
                     },
                 ]
 
-            async def fetch_track_tags_only(self, title, artist, api_key, mbid=None):
+            async def fetch_track_tags_only(
+                self, title, artist, api_key, mbid=None
+            ):
                 if title == "Chill Track":
                     return [{"name": "chill", "count": 80}]
                 return []
@@ -280,25 +306,39 @@ class TestRunPipeline:
         artists = [t.artist.lower() for t in tracks]
         assert "slowdive" not in artists
 
-    async def test_allows_seed_artist_tracks_when_exclude_seed_artists_is_false(self):
+    async def test_allows_seed_artist_tracks_when_exclude_seed_artists_is_false(
+        self,
+    ):
         tracks = await run_pipeline(
-            [TEST_SEED], "fake-api-key", None, 0, make_clients(), exclude_seed_artists=False
+            [TEST_SEED],
+            "fake-api-key",
+            None,
+            0,
+            make_clients(),
+            exclude_seed_artists=False,
         )
         artists = [t.artist.lower() for t in tracks]
         assert "slowdive" in artists
 
-    async def test_excludes_tracks_with_no_seed_tag_match_when_pool_has_enough(self):
+    async def test_excludes_tracks_with_no_seed_tag_match_when_pool_has_enough(
+        self,
+    ):
         # 5 shoegaze artists x 2 tracks each = 10 matching tracks after artist cap
         # (= RECOMMENDATION_LIMIT), plus 1 wrong-genre artist whose tracks should be filtered out
         matching_artists = [
-            {"name": f"ShoegazeBand{i}", "mbid": f"mbid-sg-{i}"} for i in range(5)
+            {"name": f"ShoegazeBand{i}", "mbid": f"mbid-sg-{i}"}
+            for i in range(5)
         ]
 
         class FilterClients(make_clients().__class__):
             async def fetch_tag_artists(self, tag, page, limit, api_key):
-                return matching_artists + [{"name": "WrongGenreBand", "mbid": "mbid-wrong"}]
+                return matching_artists + [
+                    {"name": "WrongGenreBand", "mbid": "mbid-wrong"}
+                ]
 
-            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
+            async def fetch_top_recordings_for_artist(
+                self, mbid, name, limit, api_key
+            ):
                 if mbid == "mbid-wrong":
                     return [
                         {
@@ -333,12 +373,16 @@ class TestRunPipeline:
                     },
                 ]
 
-        tracks = await run_pipeline([TEST_SEED], "fake-api-key", None, 0, FilterClients())
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, FilterClients()
+        )
         titles = [t.title for t in tracks]
         assert not any(title.startswith("Wrong Genre") for title in titles)
         assert any(title.startswith("Sg ") for title in titles)
 
-    async def test_keeps_zero_tag_score_tracks_when_filtering_would_leave_fewer_than_limit(self):
+    async def test_keeps_zero_tag_score_tracks_when_filtering_would_leave_fewer_than_limit(
+        self,
+    ):
         # 3 distinct artists with non-matching tags -- pool stays below RECOMMENDATION_LIMIT (10)
         class SmallPoolClients(make_clients().__class__):
             async def fetch_tag_artists(self, tag, page, limit, api_key):
@@ -348,7 +392,9 @@ class TestRunPipeline:
                     {"name": "Band C", "mbid": "mbid-band-c"},
                 ]
 
-            async def fetch_top_recordings_for_artist(self, mbid, name, limit, api_key):
+            async def fetch_top_recordings_for_artist(
+                self, mbid, name, limit, api_key
+            ):
                 return [
                     {
                         "mbid": f"{mbid}-track",
@@ -361,6 +407,8 @@ class TestRunPipeline:
                     }
                 ]
 
-        tracks = await run_pipeline([TEST_SEED], "fake-api-key", None, 0, SmallPoolClients())
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, SmallPoolClients()
+        )
         # Pool too small to filter -- all 3 tracks survive
         assert len(tracks) == 3

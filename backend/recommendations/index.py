@@ -76,7 +76,7 @@ def _make_real_clients():
     # than resolving every candidate up front (hundreds of MusicBrainz calls
     # per request, which gets us rate-limited), this only runs for the
     # handful of tracks that actually make it into the final results.
-    async def resolve_final_mbid(mbid, title, artist):
+    async def resolve_recording_mbid(mbid, title, artist):
         if _recording_source() != "lastfm":
             return mbid
         return await musicbrainz.resolve_canonical_mbid(mbid, title, artist)
@@ -86,7 +86,7 @@ def _make_real_clients():
         fetch_track_tags=lastfm.fetch_track_tags,
         fetch_track_tags_only=lastfm.fetch_track_tags_only,
         fetch_top_recordings_for_artist=fetch_top_recordings_for_artist,
-        resolve_final_mbid=resolve_final_mbid,
+        resolve_recording_mbid=resolve_recording_mbid,
         fetch_recording_tags=listenbrainz.fetch_recording_tags,
         fetch_artist_popularity=listenbrainz.fetch_artist_popularity,
         resolve_artist_mbid=musicbrainz.resolve_artist_mbid,

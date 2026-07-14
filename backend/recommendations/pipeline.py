@@ -282,7 +282,7 @@ async def build_track_from_candidate(candidate, clients):
     tags = get_field(candidate, "tags", [])
     streaming, mbid = await asyncio.gather(
         clients.get_streaming_links(artist, title),
-        clients.resolve_final_mbid(mbid, title, artist),
+        clients.resolve_recording_mbid(mbid, title, artist),
     )
     return Track(
         mbid=mbid,

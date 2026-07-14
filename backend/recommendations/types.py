@@ -137,7 +137,7 @@ class PipelineClients(Protocol):
 
     async def fetch_artist_popularity(self, mbids: list) -> dict: ...
 
-    async def resolve_final_mbid(
+    async def resolve_recording_mbid(
         self, mbid: str, title: str, artist: str
     ) -> str: ...
 
