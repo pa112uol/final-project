@@ -139,7 +139,7 @@ class PipelineClients(Protocol):
 
     async def resolve_recording_mbid(
         self, mbid: str, title: str, artist: str
-    ) -> str: ...
+    ) -> dict: ...
 
     async def get_streaming_links(
         self, artist: str, title: str

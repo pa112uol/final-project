@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from .types import Track
+from .types import Track, Release
 from .candidates import build_candidates
 from .tags import (
     build_tag_weights,
@@ -280,9 +280,23 @@ async def build_track_from_candidate(candidate, clients):
     rel_score = get_field(candidate, "relevance_score")
     nov_score = get_field(candidate, "novelty_score")
     tags = get_field(candidate, "tags", [])
-    streaming, mbid = await asyncio.gather(
+    streaming, resolved = await asyncio.gather(
         clients.get_streaming_links(artist, title),
         clients.resolve_recording_mbid(mbid, title, artist),
+    )
+    mbid = resolved["mbid"]
+    if duration_ms is None:
+        duration_ms = resolved["duration_ms"]
+    releases = (
+        [
+            Release(
+                mbid=resolved["release_mbid"],
+                title=resolved["album"],
+                date=resolved["release_date"],
+            )
+        ]
+        if resolved["album"]
+        else []
     )
     return Track(
         mbid=mbid,
@@ -290,8 +304,8 @@ async def build_track_from_candidate(candidate, clients):
         artist=artist,
         artist_mbid=artist_mbid,
         duration_ms=duration_ms,
-        first_release_date=None,
-        releases=[],
+        first_release_date=resolved["release_date"],
+        releases=releases,
         streaming=streaming,
         relevance_score=rel_score,
         novelty_score=nov_score,

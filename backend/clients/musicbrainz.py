@@ -255,6 +255,7 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
             else None
         )
         album = first_release.get("title") if first_release else None
+        release_mbid = first_release.get("id") if first_release else None
         raw_date = (
             r.get("first-release-date")
             or (first_release.get("date") if first_release else None)
@@ -271,8 +272,11 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
                 "title": title,
                 "artist": artist_name,
                 "album": album,
+                "release_mbid": release_mbid,
                 "release_type": release_type,
                 "year": year,
+                "release_date": raw_date or None,
+                "duration_ms": r.get("length"),
                 "score": blended,
             }
         )
@@ -281,18 +285,42 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
     return results[:10]
 
 
-# Resolve a canonical MBID for a track, using the title and artist to search
-# if the given MBID is not valid or missing. This helps to handle cases
-# where the MBID might be incorrect (e.g. from Last.fm)
-async def resolve_canonical_mbid(
+_EMPTY_RECORDING = {
+    "duration_ms": None,
+    "album": None,
+    "release_mbid": None,
+    "release_date": None,
+}
+
+
+# Resolve a canonical recording for a track, using the title and artist to
+# search if the given MBID is not valid or missing. This helps to handle
+# cases where the MBID might be incorrect (e.g. from Last.fm). Also returns
+# duration_ms and album/release info, since Last.fm's artist.getTopTracks
+# doesn't provide any of that.
+async def resolve_canonical_recording(
     mbid: str, title: str | None = None, artist: str | None = None
-) -> str:
+) -> dict:
     if title:
         try:
             results = await search_tracks_fields(title, artist)
         except Exception:
             results = []
         if results:
-            return results[0]["mbid"]
+            top = results[0]
+            return {
+                "mbid": top["mbid"],
+                "duration_ms": top["duration_ms"],
+                "album": top["album"],
+                "release_mbid": top["release_mbid"],
+                "release_date": top["release_date"],
+            }
 
-    return mbid
+    return {"mbid": mbid, **_EMPTY_RECORDING}
+
+
+async def resolve_canonical_mbid(
+    mbid: str, title: str | None = None, artist: str | None = None
+) -> str:
+    resolved = await resolve_canonical_recording(mbid, title, artist)
+    return resolved["mbid"]

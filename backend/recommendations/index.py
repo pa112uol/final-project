@@ -78,8 +78,14 @@ def _make_real_clients():
     # handful of tracks that actually make it into the final results.
     async def resolve_recording_mbid(mbid, title, artist):
         if _recording_source() != "lastfm":
-            return mbid
-        return await musicbrainz.resolve_canonical_mbid(mbid, title, artist)
+            return {
+                "mbid": mbid,
+                "duration_ms": None,
+                "album": None,
+                "release_mbid": None,
+                "release_date": None,
+            }
+        return await musicbrainz.resolve_canonical_recording(mbid, title, artist)
 
     return Clients(
         fetch_tag_artists=lastfm.fetch_tag_artists,

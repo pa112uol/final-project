@@ -7,12 +7,18 @@ from clients.musicbrainz import (
     _build_field_query,
     search_tracks,
     resolve_canonical_mbid,
+    resolve_canonical_recording,
     resolve_artist_mbid,
 )
 
 
 def _make_recording(
-    mbid="mbid1", title="Track", artist="Artist", score=100, releases=None
+    mbid="mbid1",
+    title="Track",
+    artist="Artist",
+    score=100,
+    releases=None,
+    length=None,
 ):
     rec = {
         "id": mbid,
@@ -22,6 +28,8 @@ def _make_recording(
     }
     if releases is not None:
         rec["releases"] = releases
+    if length is not None:
+        rec["length"] = length
     return rec
 
 
@@ -570,6 +578,53 @@ class TestResolveCanonicalMbid:
             result = await resolve_canonical_mbid("original-id")
         assert result == "original-id"
         assert mock_client.get.call_count == 0
+
+
+class TestResolveCanonicalRecording:
+    async def test_returns_mbid_duration_and_album_from_search(self):
+        release = _make_release(
+            title="A Night at the Opera",
+            release_type="Album",
+            date="1975-11-21",
+        )
+        release["id"] = "release-id"
+        search_resp = _make_response(
+            [
+                _make_recording(
+                    mbid="found-id",
+                    title="Bohemian Rhapsody",
+                    artist="Queen",
+                    length=354000,
+                    releases=[release],
+                )
+            ]
+        )
+        with _patch_client(search_resp):
+            result = await resolve_canonical_recording(
+                "stale-id", "Bohemian Rhapsody", "Queen"
+            )
+        assert result == {
+            "mbid": "found-id",
+            "duration_ms": 354000,
+            "album": "A Night at the Opera",
+            "release_mbid": "release-id",
+            "release_date": "1975-11-21",
+        }
+
+    async def test_returns_original_mbid_and_no_data_when_search_finds_nothing(
+        self,
+    ):
+        with _patch_client(_make_response([])):
+            result = await resolve_canonical_recording(
+                "original-id", "Some Obscure Track", "Some Artist"
+            )
+        assert result == {
+            "mbid": "original-id",
+            "duration_ms": None,
+            "album": None,
+            "release_mbid": None,
+            "release_date": None,
+        }
 
 
 def make_mb_resp(artists, success=True):

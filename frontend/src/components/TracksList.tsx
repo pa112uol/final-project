@@ -44,9 +44,14 @@ function releaseYear(track: Track): string | null {
   return date ? date.slice(0, 4) : null;
 }
 
+function albumName(track: Track): string | null {
+  return track.releases[0]?.title || null;
+}
+
 function TrackCard({ track }: { track: Track }) {
   const year = releaseYear(track);
   const duration = fmtDuration(track.durationMs);
+  const album = albumName(track);
   return (
     <div className="bg-bg-surface rounded-xl p-4 space-y-3">
       <div className="flex gap-3 items-start">
@@ -63,6 +68,7 @@ function TrackCard({ track }: { track: Track }) {
           </h3>
           <p className="text-text-secondary text-sm">
             {track.artist}
+            {album && <span className="ml-2 text-text-muted">{album}</span>}
             {year && <span className="ml-2 text-text-muted">{year}</span>}
             {duration && (
               <span className="ml-2 text-text-muted">{duration}</span>

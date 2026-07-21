@@ -1,3 +1,4 @@
+import asyncio
 from .http import get_client
 
 MB_BASE = "https://musicbrainz.org/ws/2"
@@ -5,16 +6,23 @@ CAA_BASE = "https://coverartarchive.org"
 
 
 async def _release_mbids_for_recording(recording_mbid: str) -> list[str]:
-    try:
-        res = await get_client("coverart-mb", timeout=8).get(
-            f"{MB_BASE}/recording/{recording_mbid}",
-            params={"inc": "releases", "fmt": "json"},
-        )
-        if not res.is_success:
+    for attempt in range(2):
+        try:
+            res = await get_client("coverart-mb", timeout=8).get(
+                f"{MB_BASE}/recording/{recording_mbid}",
+                params={"inc": "releases", "fmt": "json"},
+            )
+            if res.status_code in (429, 503):
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+                    continue
+                return []
+            if not res.is_success:
+                return []
+            return [r["id"] for r in res.json().get("releases") or []]
+        except Exception:
             return []
-        return [r["id"] for r in res.json().get("releases") or []]
-    except Exception:
-        return []
+    return []
 
 
 async def _front_art_url(release_mbid: str) -> str | None:

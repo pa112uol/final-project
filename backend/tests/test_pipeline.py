@@ -12,6 +12,16 @@ def make_streaming():
     )
 
 
+def make_resolved(mbid, duration_ms=None, album=None, release_mbid=None, release_date=None):
+    return {
+        "mbid": mbid,
+        "duration_ms": duration_ms,
+        "album": album,
+        "release_mbid": release_mbid,
+        "release_date": release_date,
+    }
+
+
 def make_clients(**overrides):
     class Clients:
         async def fetch_recording_tags(self, mbid):
@@ -79,7 +89,7 @@ def make_clients(**overrides):
             return {}
 
         async def resolve_recording_mbid(self, mbid, title, artist):
-            return mbid
+            return make_resolved(mbid)
 
         async def get_streaming_links(self, artist, title):
             return make_streaming()
@@ -141,7 +151,7 @@ class TestRunPipeline:
                 return {}
 
             async def resolve_recording_mbid(self, mbid, title, artist):
-                return mbid
+                return make_resolved(mbid)
 
             async def get_streaming_links(self, artist, title):
                 return make_streaming()
@@ -196,6 +206,68 @@ class TestRunPipeline:
             [TEST_SEED], "fake-api-key", None, 0, clients
         )
         assert len(calls) == len(tracks)
+
+    async def test_keeps_source_duration_when_already_present(self):
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, make_clients()
+        )
+        assert tracks
+        assert all(t.duration_ms is not None for t in tracks)
+
+    async def test_falls_back_to_resolved_duration_when_source_has_none(self):
+        class NoDurationClients(make_clients().__class__):
+            async def fetch_top_recordings_for_artist(
+                self, mbid, name, limit, api_key
+            ):
+                return [
+                    {
+                        "mbid": "rec-no-duration",
+                        "title": "Alison",
+                        "artist_mbid": "mbid-slowdive",
+                        "duration_ms": None,
+                        "listen_count": 50000,
+                        "user_count": 20000,
+                        "tags": ["shoegaze"],
+                    },
+                ]
+
+            async def resolve_recording_mbid(self, mbid, title, artist):
+                return make_resolved(mbid, duration_ms=232000)
+
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, NoDurationClients()
+        )
+        assert tracks
+        assert all(t.duration_ms == 232000 for t in tracks)
+
+    async def test_populates_album_and_release_date_from_resolved_recording(self):
+        class AlbumClients(make_clients().__class__):
+            async def resolve_recording_mbid(self, mbid, title, artist):
+                return make_resolved(
+                    mbid,
+                    album="Souvlaki",
+                    release_mbid="release-souvlaki",
+                    release_date="1993-05-17",
+                )
+
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, AlbumClients()
+        )
+        assert tracks
+        for t in tracks:
+            assert t.first_release_date == "1993-05-17"
+            assert len(t.releases) == 1
+            assert t.releases[0].mbid == "release-souvlaki"
+            assert t.releases[0].title == "Souvlaki"
+            assert t.releases[0].date == "1993-05-17"
+
+    async def test_leaves_releases_empty_when_resolved_recording_has_no_album(self):
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, make_clients()
+        )
+        assert tracks
+        assert all(t.first_release_date is None for t in tracks)
+        assert all(t.releases == [] for t in tracks)
 
     async def test_applies_mood_boost_happy_candidates_outrank_equal_non_happy(
         self,

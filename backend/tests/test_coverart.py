@@ -1,9 +1,10 @@
 import json
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from django.test import RequestFactory
 import api.views as views
 from api.views import coverart
+from clients.coverart import _release_mbids_for_recording
 
 
 @pytest.fixture(autouse=True)
@@ -66,3 +67,42 @@ def test_negative_result_within_ttl_is_not_re_fetched(rf):
         coverart(rf.get("/api/coverart/", {"mbid": "no-art-789"}))
         coverart(rf.get("/api/coverart/", {"mbid": "no-art-789"}))
     assert mock_fetch.call_count == 1
+
+
+def _mb_response(status_code, releases=None):
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.is_success = status_code == 200
+    resp.json.return_value = {"releases": releases or []}
+    return resp
+
+
+class TestReleaseMbidsForRecording:
+    async def test_retries_once_on_rate_limit_then_succeeds(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(
+            side_effect=[
+                _mb_response(429),
+                _mb_response(200, releases=[{"id": "release-1"}]),
+            ]
+        )
+        with (
+            patch("clients.coverart.get_client", return_value=mock_client),
+            patch("clients.coverart.asyncio.sleep", new=AsyncMock()),
+        ):
+            result = await _release_mbids_for_recording("some-mbid")
+        assert result == ["release-1"]
+        assert mock_client.get.call_count == 2
+
+    async def test_gives_up_after_second_rate_limit(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(
+            side_effect=[_mb_response(503), _mb_response(503)]
+        )
+        with (
+            patch("clients.coverart.get_client", return_value=mock_client),
+            patch("clients.coverart.asyncio.sleep", new=AsyncMock()),
+        ):
+            result = await _release_mbids_for_recording("some-mbid")
+        assert result == []
+        assert mock_client.get.call_count == 2
