@@ -5,6 +5,7 @@ from clients.listenbrainz import (
     fetch_artist_top_recordings,
     fetch_recording_popularity,
     fetch_artist_popularity,
+    TAG_LEVEL_WEIGHTS,
 )
 
 
@@ -29,7 +30,7 @@ class TestFetchRecordingTags:
         with patch("clients.listenbrainz.get_client", return_value=client):
             assert await fetch_recording_tags("abc-mbid") == []
 
-    async def test_merges_tags_from_all_three_sources(self):
+    async def test_merges_tags_from_all_three_sources_weighted_by_scope(self):
         data = {
             "abc-mbid": {
                 "tag": {
@@ -43,8 +44,32 @@ class TestFetchRecordingTags:
         with patch("clients.listenbrainz.get_client", return_value=client):
             result = await fetch_recording_tags("abc-mbid")
         result_map = {r["name"]: r["count"] for r in result}
-        assert result_map["rock"] == 7  # 5 + 2 merged across sources
-        assert result_map["indie"] == 3
+        assert result_map["rock"] == pytest.approx(
+            5 * TAG_LEVEL_WEIGHTS["recording"]
+            + 2 * TAG_LEVEL_WEIGHTS["release_group"]
+        )
+        assert result_map["indie"] == pytest.approx(
+            3 * TAG_LEVEL_WEIGHTS["artist"]
+        )
+
+    async def test_discounts_broader_scopes_against_an_equal_recording_count(self):
+        # Equal raw votes must not mean equal weight: the recording's own tag
+        # outranks the album's, which outranks the artist's. Otherwise the seed
+        # profile drifts from describing the track to describing the artist.
+        data = {
+            "abc-mbid": {
+                "tag": {
+                    "recording": [{"tag": "mellow", "count": 10}],
+                    "release_group": [{"tag": "funk", "count": 10}],
+                    "artist": [{"tag": "funk rock", "count": 10}],
+                }
+            }
+        }
+        client, _ = make_client(data)
+        with patch("clients.listenbrainz.get_client", return_value=client):
+            result = await fetch_recording_tags("abc-mbid")
+        counts = {r["name"]: r["count"] for r in result}
+        assert counts["mellow"] > counts["funk"] > counts["funk rock"]
 
     async def test_returns_empty_when_no_tag_block(self):
         data = {"abc-mbid": {}}

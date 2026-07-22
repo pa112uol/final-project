@@ -1,10 +1,12 @@
 import asyncio
 import logging
+import math
 from .types import Track, Release
 from .candidates import build_candidates
 from .tags import (
     build_tag_weights,
     merge_tags,
+    rank_tags_per_seed,
     MOOD_TAGS,
     normalize_tag,
     is_noise_tag,
@@ -79,33 +81,93 @@ async def fetch_and_merge_seed_tags(seed, clients, api_key):
     return merge_tags(lb_tags, lf_tags)
 
 
+def _is_specific_tag(tag, seed_artist_names):
+    norm = normalize_tag(tag).lower()
+    return (
+        norm not in BROAD_FETCH_TAGS
+        and norm not in seed_artist_names
+        and not is_noise_tag(tag)
+    )
+
+
+# Interleave each seed's own top specific tags so every seed gets a share of
+# the fetch budget. A global top-K over the pooled profile can be won outright
+# by one seed: seeds usually agree only on broad tags ("rock"), which are
+# filtered here, leaving single-seed tags whose IDF term is then a constant --
+# so the pooled ranking degenerates into raw tag counts and a two-seed query
+# silently becomes a one-seed query.
+def _round_robin_seed_tags(per_seed_tags, weight_of, seed_artist_names):
+    queues = [
+        [t for t in tags if _is_specific_tag(t, seed_artist_names)]
+        for tags in per_seed_tags
+    ]
+    chosen = []
+    seen = set()
+    for depth in range(max((len(q) for q in queues), default=0)):
+        for queue in queues:
+            if depth >= len(queue) or len(chosen) >= TOP_TAGS_COUNT:
+                continue
+            tag = queue[depth]
+            norm = normalize_tag(tag).lower()
+            if norm not in seen:
+                seen.add(norm)
+                chosen.append((tag, weight_of.get(norm, 0)))
+        if len(chosen) >= TOP_TAGS_COUNT:
+            break
+    return chosen, seen
+
+
 # Prefer specific tags for fetching. Fallback to broad ones only when fewer
 # than 2 specific tags exist (e.g. a pure rock seed with no sub-genre)
-def select_fetch_tags(sorted_tags, seed_artist_names):
+def select_fetch_tags(sorted_tags, seed_artist_names, per_seed_tags=None):
     specific_tags = [
         (tag, w)
         for tag, w in sorted_tags
-        if (
-            normalize_tag(tag) not in BROAD_FETCH_TAGS
-            and tag not in seed_artist_names
+        if _is_specific_tag(tag, seed_artist_names)
+    ]
+
+    if len(specific_tags) < 2:
+        return [
+            (tag, w)
+            for tag, w in sorted_tags
+            if normalize_tag(tag).lower() not in seed_artist_names
             and not is_noise_tag(tag)
-        )
-    ][:TOP_TAGS_COUNT]
+        ][:TOP_TAGS_COUNT]
 
-    if len(specific_tags) >= 2:
-        return specific_tags
+    if not per_seed_tags or len(per_seed_tags) < 2:
+        return specific_tags[:TOP_TAGS_COUNT]
 
-    return [
-        (tag, w)
-        for tag, w in sorted_tags
-        if tag not in seed_artist_names and not is_noise_tag(tag)
-    ][:TOP_TAGS_COUNT]
+    weight_of = {
+        normalize_tag(tag).lower(): w for tag, w in sorted_tags
+    }
+    chosen, seen = _round_robin_seed_tags(
+        per_seed_tags, weight_of, seed_artist_names
+    )
+    # Top up from the pooled ranking if the seeds had few specific tags
+    for tag, w in specific_tags:
+        if len(chosen) >= TOP_TAGS_COUNT:
+            break
+        if normalize_tag(tag).lower() not in seen:
+            seen.add(normalize_tag(tag).lower())
+            chosen.append((tag, w))
+    return chosen
 
 
+# Cosine similarity between the candidate's (binary) tag vector and the
+# weighted seed profile. A raw weight sum rewards a candidate for merely
+# carrying more tags -- and LF enrichment adds tags to some candidates and not
+# others -- so dividing by the vector length removes that bias. The seed
+# profile's norm is constant across candidates and so is omitted; it would
+# scale every score identically without changing the ranking.
 def compute_track_tag_score(tags, normalized_tag_weights):
-    return sum(
+    if not tags:
+        return 0.0
+    matched = sum(
         normalized_tag_weights.get(normalize_tag(t.lower()), 0) for t in tags
     )
+    if not matched:
+        return 0.0
+    return matched / math.sqrt(len(tags))
 
 
 # Compute track-level tag scores against the weighted seed profile
@@ -171,9 +233,11 @@ async def enrich_candidate_with_lf_tags(
 
 
 # Enrich all candidates with LF track tags.
-# 1) It enables mood boosting - LB recording tags are genre-only (e.g. "shoegaze")
-# and never contain mood words; without this step the mood multiplier never fires
-# 2)It provides track-level signal for same-artist tie-breaking that the shared
+# 1) It fills coverage gaps: candidates come from ListenBrainz, whose tag data
+# is intermittent and thin for less popular recordings. (Note LB tags are not
+# genre-only -- the recording scope does carry mood words like "mellow" and
+# "bittersweet" -- so this is about coverage, not about mood specifically.)
+# 2) It provides track-level signal for same-artist tie-breaking that the shared
 # artist tag_weight_sum cannot resolve
 # Tags are merged rather than replaced so LB genre labels are preserved for MMR.
 async def enrich_candidates_with_lf_tags(
@@ -337,7 +401,8 @@ async def run_pipeline(
         *[fetch_and_merge_seed_tags(seed, clients, api_key) for seed in seeds]
     )
     tag_weights = build_tag_weights(seed_tag_sets)
-    sorted_tags = sorted(tag_weights.items(), key=lambda x: -x[1])
+    # Name breaks weight ties so the fetch set is stable across runs
+    sorted_tags = sorted(tag_weights.items(), key=lambda x: (-x[1], x[0]))
 
     if not sorted_tags:
         return []
@@ -345,7 +410,9 @@ async def run_pipeline(
     # Exclude tags that match a seed artist name, e.g. "queen" for a Queen seed
     # would make fetch_tag_artists return mostly Queen members and collaborators
     seed_artist_names = {get_field(s, "artist").lower() for s in seeds}
-    fetch_tags = select_fetch_tags(sorted_tags, seed_artist_names)
+    fetch_tags = select_fetch_tags(
+        sorted_tags, seed_artist_names, rank_tags_per_seed(seed_tag_sets)
+    )
     logger.info(
         "[tags] fetch tags: %s",
         ", ".join(f"{t}({w:.0f})" for t, w in fetch_tags),

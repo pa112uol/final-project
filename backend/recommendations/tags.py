@@ -1,6 +1,6 @@
 import re
 import math
-from .constants import LB_TAG_SCALE
+from .constants import LB_SOURCE_WEIGHT, TAG_COUNT_SCALE
 from .types import LFTag
 from .utils import get_field
 
@@ -51,6 +51,7 @@ BROAD_FETCH_TAGS = {
     "latin",
     "classic rock",
     "alternative rock",
+    "general alternative rock",
     "indie rock",
     "indie pop",
     "60s",
@@ -62,6 +63,36 @@ BROAD_FETCH_TAGS = {
     "2010s",
     "2020s",
     "british",
+}
+
+# Nationality / geography tags describe where an artist is from, not how the
+# music sounds. tag.getTopArtists on these returns a stylistically random
+# cross-section of a whole country's output.
+GEO_TAGS = {
+    "american",
+    "british",
+    "english",
+    "irish",
+    "scottish",
+    "welsh",
+    "australian",
+    "canadian",
+    "swedish",
+    "norwegian",
+    "finnish",
+    "german",
+    "french",
+    "italian",
+    "spanish",
+    "japanese",
+    "korean",
+    "brazilian",
+    "usa",
+    "uk",
+    "california",
+    "seattle",
+    "london",
+    "new york",
 }
 
 MOOD_TAGS = {
@@ -94,32 +125,86 @@ def is_noise_tag(tag: str) -> bool:
     if re.fullmatch(r"\d{2}s", tag):
         # abbreviated decades: 70s, 80s, 90s
         return True
+    if normalize_tag(tag).lower() in GEO_TAGS:
+        # nationality/place tags: american, british, california
+        return True
     return False
 
 
-# Merge ListenBrainz and Last.fm tags, weighting LB tags higher than LF tags
-def merge_tags(lb_tags: list, lf_tags: list) -> list:
-    merged = {}
-    for entry in lb_tags:
-        name = get_field(entry, "name")
-        count = get_field(entry, "count")
-        norm = normalize_tag(name)
-        if norm not in NOISE_TAGS:
-            if norm in merged:
-                merged[norm]["count"] += count * LB_TAG_SCALE
-            else:
-                merged[norm] = {"count": count * LB_TAG_SCALE, "original": name}
-    # Last.fm supplements with mood/vibe tags absent from LB; if a tag is
-    # already present from LB, keep the boosted LB weight
-    for entry in lf_tags:
-        name = get_field(entry, "name")
-        count = get_field(entry, "count")
-        norm = normalize_tag(name)
-        if norm not in NOISE_TAGS and norm not in merged:
-            merged[norm] = {"count": count, "original": name}
+# Each seed's own tags ranked by that seed's counts. build_tag_weights pools
+# every seed into one profile, which lets a single strongly-tagged seed own
+# the top of the ranking; keeping the per-seed order lets the caller give
+# every seed a guaranteed share of the fetch budget.
+def rank_tags_per_seed(seed_tag_sets: list) -> list:
     return [
-        LFTag(name=v["original"], count=v["count"]) for v in merged.values()
+        [
+            get_field(entry, "name")
+            for entry in sorted(
+                tags, key=lambda e: -get_field(e, "count", 0)
+            )
+        ]
+        for tags in seed_tag_sets
     ]
+
+
+# Collapse a single source's tags to {normalized_name: share}, where share is
+# relative to that source's own strongest tag. This is what makes the two
+# sources comparable: it strips out whether the source counts in raw votes or
+# in per-track percentages and leaves only "how strongly does this source
+# associate this tag with this track".
+def _normalized_source_counts(entries: list):
+    totals = {}
+    originals = {}
+    for entry in entries:
+        name = get_field(entry, "name")
+        count = get_field(entry, "count", 0) or 0
+        norm = normalize_tag(name)
+        if norm in NOISE_TAGS:
+            continue
+        totals[norm] = totals.get(norm, 0) + count
+        originals.setdefault(norm, name)
+    max_count = max(totals.values(), default=0)
+    if max_count <= 0:
+        return {}, originals
+    return {norm: c / max_count for norm, c in totals.items()}, originals
+
+
+# Blend ListenBrainz and Last.fm tags additively, so a tag both sources agree
+# on reinforces instead of one source's value being discarded.
+def merge_tags(lb_tags: list, lf_tags: list) -> list:
+    lb_counts, lb_originals = _normalized_source_counts(lb_tags)
+    lf_counts, lf_originals = _normalized_source_counts(lf_tags)
+
+    # A missing source hands its whole share to the other rather than shrinking
+    # the profile. Otherwise a seed ListenBrainz has no data for would
+    # contribute systematically weaker tags than its co-seeds to the pooled
+    # multi-seed profile, purely because of upstream availability.
+    lb_share = LB_SOURCE_WEIGHT
+    lf_share = 1 - LB_SOURCE_WEIGHT
+    if not lb_counts:
+        lb_share, lf_share = 0.0, 1.0
+    elif not lf_counts:
+        lb_share, lf_share = 1.0, 0.0
+
+    # Iterate in insertion order (LB first, then LF-only tags) rather than over
+    # a set, so equal-weighted tags always tie-break the same way across runs.
+    ordered_norms = list(lb_counts) + [
+        norm for norm in lf_counts if norm not in lb_counts
+    ]
+
+    merged = []
+    for norm in ordered_norms:
+        blended = (
+            lb_share * lb_counts.get(norm, 0)
+            + lf_share * lf_counts.get(norm, 0)
+        )
+        if blended <= 0:
+            continue
+        original = lb_originals.get(norm) or lf_originals.get(norm)
+        merged.append(
+            LFTag(name=original, count=blended * TAG_COUNT_SCALE)
+        )
+    return merged
 
 
 # Compute tag weights for a set of seed tags, using TF-IDF style weighting

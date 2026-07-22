@@ -6,6 +6,24 @@ from .http import get_client
 
 LB_BASE = "https://api.listenbrainz.org/1"
 
+# The metadata endpoint returns tags at three scopes, and their counts are not
+# comparable: artist tags accumulate votes across a whole discography, so they
+# dwarf a single recording's. Summing them raw makes a seed profile describe
+# the artist rather than the track -- for "Californication", 22 of the 31
+# "funk rock" votes are artist-level and only 1 is the recording's, while the
+# song's own character (mellow, melancholic) sits at 1-2. Down-weighting the
+# broader scopes keeps them as context without letting them dominate.
+# The artist weight is a balance, not a minimisation: recording-scope counts
+# are sparse (often 1-2 votes), so discounting artist scope too hard leaves the
+# profile thin enough for one tag to dominate. At 0.15 this query lost "grunge"
+# entirely and returned AC/DC and Kiss; 0.3 keeps each seed's distinctive tags
+# while cutting pure artist-bleed tags like "rap rock" to a minor contribution.
+TAG_LEVEL_WEIGHTS = {
+    "recording": 1.0,
+    "release_group": 0.4,
+    "artist": 0.3,
+}
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,25 +46,40 @@ async def fetch_recording_tags(mbid: str) -> list:
             f"{LB_BASE}/metadata/recording/",
             params={"recording_mbids": mbid, "inc": "tag"},
         )
+        # An outage and a genuinely untagged recording both yield an empty tag
+        # list, but they mean opposite things: the first silently halves a
+        # two-source profile, the second is real data. Log which one happened
+        # so a run's tag profile can be interpreted after the fact.
         if not res.is_success:
+            logger.warning(
+                "[listenbrainz] recording tags unavailable for %s: HTTP %s",
+                mbid,
+                res.status_code,
+            )
             return []
         data = res.json()
         tag_block = data.get(mbid, {}).get("tag")
         if not tag_block:
+            logger.info(
+                "[listenbrainz] no tags for recording %s (endpoint healthy)",
+                mbid,
+            )
             return []
-        entries = (
-            (tag_block.get("recording") or [])
-            + (tag_block.get("artist") or [])
-            + (tag_block.get("release_group") or [])
-        )
         merged = {}
-        for entry in entries:
-            name = entry.get("tag", "").lower().strip()
-            count = entry.get("count", 0)
-            if name:
-                merged[name] = merged.get(name, 0) + count
+        for level, weight in TAG_LEVEL_WEIGHTS.items():
+            for entry in tag_block.get(level) or []:
+                name = entry.get("tag", "").lower().strip()
+                count = entry.get("count", 0)
+                if name:
+                    merged[name] = merged.get(name, 0) + count * weight
         return [{"name": k, "count": v} for k, v in merged.items()]
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "[listenbrainz] recording tags failed for %s: %s: %s",
+            mbid,
+            type(exc).__name__,
+            exc,
+        )
         return []
 
 

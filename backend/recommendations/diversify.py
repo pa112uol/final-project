@@ -18,23 +18,33 @@ def jaccard_sets(a: set, b: set) -> float:
     return intersection / (len(a) + len(b) - intersection)
 
 
-def _max_similarity_to_selected(tokens: set, selected_tokens: list) -> float:
-    if not selected_tokens:
+# Two tracks by the same artist are maximally redundant regardless of how
+# their tag strings happen to overlap, so artist identity short-circuits the
+# tag comparison. Without this a second track by an already-selected artist
+# pays only a partial Jaccard penalty and can still outrank a fresh artist.
+def _pair_similarity(item, other) -> float:
+    if item["artist"] and item["artist"] == other["artist"]:
+        return 1.0
+    return jaccard_sets(item["tokens"], other["tokens"])
+
+
+def _max_similarity_to_selected(item: dict, selected: list) -> float:
+    if not selected:
         return 0
-    return max(jaccard_sets(tokens, st) for st in selected_tokens)
+    return max(_pair_similarity(item, other) for other in selected)
 
 
-def _mmr_score(final_score: float, tokens: set, selected_tokens: list) -> float:
-    max_sim = _max_similarity_to_selected(tokens, selected_tokens)
+def _mmr_score(item: dict, selected: list) -> float:
+    max_sim = _max_similarity_to_selected(item, selected)
+    final_score = get_field(item["c"], "final_score")
     return MMR_LAMBDA * final_score - (1 - MMR_LAMBDA) * max_sim
 
 
-def _pick_best(remaining: list, selected_tokens: list) -> int:
+def _pick_best(remaining: list, selected: list) -> int:
     best_idx = 0
     best_score = float("-inf")
     for i, item in enumerate(remaining):
-        final_score = get_field(item["c"], "final_score")
-        score = _mmr_score(final_score, item["tokens"], selected_tokens)
+        score = _mmr_score(item, selected)
         if score > best_score:
             best_score = score
             best_idx = i
@@ -43,16 +53,17 @@ def _pick_best(remaining: list, selected_tokens: list) -> int:
 
 def mmr_select(ranked: list, k: int) -> list:
     remaining = [
-        {"c": c, "tokens": tokenize(get_field(c, "tags"))}
+        {
+            "c": c,
+            "tokens": tokenize(get_field(c, "tags")),
+            "artist": (get_field(c, "artist") or "").lower(),
+        }
         for c in ranked
     ]
     selected = []
-    selected_tokens = []
 
     while len(selected) < k and remaining:
-        best_idx = _pick_best(remaining, selected_tokens)
-        selected.append(remaining[best_idx]["c"])
-        selected_tokens.append(remaining[best_idx]["tokens"])
-        remaining.pop(best_idx)
+        best_idx = _pick_best(remaining, selected)
+        selected.append(remaining.pop(best_idx))
 
-    return selected
+    return [item["c"] for item in selected]

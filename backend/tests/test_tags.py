@@ -8,6 +8,7 @@ from recommendations.tags import (
     BROAD_FETCH_TAGS,
     MOOD_TAGS,
 )
+from recommendations.constants import LB_SOURCE_WEIGHT, TAG_COUNT_SCALE
 
 
 class TestNormalizeTag:
@@ -75,13 +76,43 @@ class TestIsNoiseTag:
 
 
 class TestMergeTags:
-    def test_scales_lb_tags_and_keeps_them_over_lf_duplicates(self):
+    def test_normalizes_each_source_against_its_own_maximum(self):
+        # LB counts raw votes, LF counts per-track percentages. A tag that
+        # tops both sources scores full strength despite counts of 3 vs 100.
         lb_tags = [{"name": "shoegaze", "count": 3}]
         lf_tags = [{"name": "shoegaze", "count": 100}]
         result = merge_tags(lb_tags, lf_tags)
-        # LB tag with count 3 gets scaled to 3*15=45, not replaced by LF's 100
         assert len(result) == 1
-        assert result[0].count == 45
+        assert result[0].count == pytest.approx(TAG_COUNT_SCALE)
+
+    def test_agreeing_sources_reinforce_rather_than_one_replacing_the_other(self):
+        # "shoegaze" tops both sources; "dreamy" is LF-only at the same LF
+        # strength as "noisy" is LB-only. Agreement must outrank either alone.
+        lb_tags = [{"name": "shoegaze", "count": 10}, {"name": "noisy", "count": 10}]
+        lf_tags = [{"name": "shoegaze", "count": 100}, {"name": "dreamy", "count": 100}]
+        by_name = {t.name: t.count for t in merge_tags(lb_tags, lf_tags)}
+        assert by_name["shoegaze"] > by_name["noisy"]
+        assert by_name["shoegaze"] > by_name["dreamy"]
+        # LB-only vs LF-only reflect the configured source weighting
+        assert by_name["noisy"] == pytest.approx(LB_SOURCE_WEIGHT * TAG_COUNT_SCALE)
+        assert by_name["dreamy"] == pytest.approx(
+            (1 - LB_SOURCE_WEIGHT) * TAG_COUNT_SCALE
+        )
+
+    def test_lf_carries_full_weight_when_lb_returns_nothing(self):
+        # ListenBrainz coverage is intermittent. A seed it has no data for must
+        # still yield a full-strength profile, or it would contribute
+        # systematically weaker tags than its co-seeds when they are pooled.
+        lf_tags = [{"name": "shoegaze", "count": 100}, {"name": "dreamy", "count": 50}]
+        by_name = {t.name: t.count for t in merge_tags([], lf_tags)}
+        assert by_name["shoegaze"] == pytest.approx(TAG_COUNT_SCALE)
+        assert by_name["dreamy"] == pytest.approx(TAG_COUNT_SCALE / 2)
+
+    def test_lb_carries_full_weight_when_lf_returns_nothing(self):
+        lb_tags = [{"name": "shoegaze", "count": 8}, {"name": "noisy", "count": 4}]
+        by_name = {t.name: t.count for t in merge_tags(lb_tags, [])}
+        assert by_name["shoegaze"] == pytest.approx(TAG_COUNT_SCALE)
+        assert by_name["noisy"] == pytest.approx(TAG_COUNT_SCALE / 2)
 
     def test_includes_lf_only_tags_not_present_in_lb(self):
         lb_tags = [{"name": "shoegaze", "count": 2}]
@@ -93,7 +124,10 @@ class TestMergeTags:
         names = [t.name for t in result]
         assert "dreamy" in names
         dreamy = next(t for t in result if t.name == "dreamy")
-        assert dreamy.count == 50
+        # 50/90 of LF's strength, taking LF's (1 - LB_SOURCE_WEIGHT) share
+        assert dreamy.count == pytest.approx(
+            (50 / 90) * (1 - LB_SOURCE_WEIGHT) * TAG_COUNT_SCALE
+        )
 
     def test_filters_noise_tags_from_both_sources(self):
         lb_tags = [{"name": "seen live", "count": 5}]

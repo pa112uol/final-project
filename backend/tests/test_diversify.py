@@ -94,19 +94,48 @@ class TestMmrSelect:
         assert result[0].mbid == "best"
 
     def test_penalizes_candidates_with_similar_tags_to_already_selected_ones(self):
-        # "copy" has the same tags as "best" and should be deprioritized vs "diverse"
+        # "copy" has the same tags as "best" and should be deprioritized vs
+        # "diverse". Artists must differ, or same-artist redundancy would
+        # dominate and mask the tag comparison under test.
         ranked = [
             make_scored_candidate(
-                mbid="best", final_score=0.9, tags=["shoegaze", "dreampop"]
+                mbid="best",
+                artist="A",
+                final_score=0.9,
+                tags=["shoegaze", "dreampop"],
             ),
             make_scored_candidate(
-                mbid="copy", final_score=0.85, tags=["shoegaze", "dreampop"]
+                mbid="copy",
+                artist="B",
+                final_score=0.85,
+                tags=["shoegaze", "dreampop"],
             ),
             make_scored_candidate(
-                mbid="diverse", final_score=0.8, tags=["techno", "electronic"]
+                mbid="diverse",
+                artist="C",
+                final_score=0.8,
+                tags=["techno", "electronic"],
             ),
         ]
         result = mmr_select(ranked, 2)
         assert result[0].mbid == "best"
         # The second pick should prefer "diverse" over "copy" due to MMR penalty
         assert result[1].mbid == "diverse"
+
+    def test_penalizes_second_track_by_an_already_selected_artist(self):
+        # Same artist is maximally redundant even when the tag strings differ,
+        # so the lower-scoring track by a fresh artist should win the slot.
+        ranked = [
+            make_scored_candidate(
+                mbid="best", artist="A", final_score=0.9, tags=["shoegaze"]
+            ),
+            make_scored_candidate(
+                mbid="same-artist", artist="A", final_score=0.85, tags=["techno"]
+            ),
+            make_scored_candidate(
+                mbid="other-artist", artist="B", final_score=0.8, tags=["techno"]
+            ),
+        ]
+        result = mmr_select(ranked, 2)
+        assert result[0].mbid == "best"
+        assert result[1].mbid == "other-artist"

@@ -33,6 +33,7 @@ frontend/build/
 *.pem
 /docs
 /references
+backend/demo
 
 # debug
 npm-debug.log*
