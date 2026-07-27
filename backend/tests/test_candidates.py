@@ -2,6 +2,7 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch
 from recommendations.candidates import build_candidates
+from recommendations.constants import TOP_ARTISTS_COUNT
 
 RECORDING_A = {
     "mbid": "rec-a",
@@ -182,8 +183,13 @@ class TestBuildCandidates:
         assert result == []
 
     async def test_selects_artists_with_highest_tag_weight_sum_when_list_exceeds_top_artists_count(self):
-        # Build 20 artists with distinct scores. At novelty=0, top_artists_count=15.
-        many_artists = [{"name": f"Artist{i}", "mbid": f"mbid-{i}"} for i in range(20)]
+        # More artists available than the cap allows, so the cap has to bite.
+        # Asserted against the constant rather than a literal so retuning the
+        # pool size does not silently turn this into a no-op.
+        many_artists = [
+            {"name": f"Artist{i}", "mbid": f"mbid-{i}"}
+            for i in range(TOP_ARTISTS_COUNT + 5)
+        ]
 
         async def fetch_tag_artists(tag, page, limit, api_key):
             return many_artists
@@ -196,8 +202,8 @@ class TestBuildCandidates:
             fetch_top_recordings_for_artist=fetch_recordings,
         )
         result = await build_candidates(TOP_TAGS, "key", 0, clients)
-        # At novelty=0, at most 15 artists, each with 1 recording = max 15 candidates
-        assert len(result) <= 15
+        # At novelty=0 each selected artist contributes its single recording
+        assert len(result) <= TOP_ARTISTS_COUNT
 
     async def test_applies_rank_decay_so_first_artist_receives_more_credit(self):
         async def fetch_tag_artists(tag, page, limit, api_key):

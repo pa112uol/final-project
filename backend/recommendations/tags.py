@@ -1,6 +1,6 @@
 import re
 import math
-from .constants import LB_SOURCE_WEIGHT, TAG_COUNT_SCALE
+from .constants import LB_SOURCE_WEIGHT, TAG_COUNT_SCALE, DISTINCTIVE_TOP_N
 from .types import LFTag
 from .utils import get_field
 
@@ -139,9 +139,7 @@ def rank_tags_per_seed(seed_tag_sets: list) -> list:
     return [
         [
             get_field(entry, "name")
-            for entry in sorted(
-                tags, key=lambda e: -get_field(e, "count", 0)
-            )
+            for entry in sorted(tags, key=lambda e: -get_field(e, "count", 0))
         ]
         for tags in seed_tag_sets
     ]
@@ -194,16 +192,13 @@ def merge_tags(lb_tags: list, lf_tags: list) -> list:
 
     merged = []
     for norm in ordered_norms:
-        blended = (
-            lb_share * lb_counts.get(norm, 0)
-            + lf_share * lf_counts.get(norm, 0)
+        blended = lb_share * lb_counts.get(norm, 0) + lf_share * lf_counts.get(
+            norm, 0
         )
         if blended <= 0:
             continue
         original = lb_originals.get(norm) or lf_originals.get(norm)
-        merged.append(
-            LFTag(name=original, count=blended * TAG_COUNT_SCALE)
-        )
+        merged.append(LFTag(name=original, count=blended * TAG_COUNT_SCALE))
     return merged
 
 
@@ -236,3 +231,41 @@ def build_tag_weights(seed_tag_sets: list) -> dict:
         weights[tag_original[norm]] = tf * idf
 
     return weights
+
+
+# The tags that belong to one seed's top tags and to no other seed's. Tags
+# every seed shares say nothing about which seed a track leans toward, so only
+# the distinctive ones identify a track's seed. Used both to steer selection
+# toward covering every seed and to measure whether it did
+def distinctive_tags_per_seed(
+    seed_tag_sets: list, top_n: int = DISTINCTIVE_TOP_N
+) -> list:
+    per_seed = [
+        {
+            normalize_tag(get_field(entry, "name").lower())
+            for entry in sorted(tags, key=lambda e: -get_field(e, "count", 0))[
+                :top_n
+            ]
+        }
+        for tags in seed_tag_sets
+    ]
+    distinctive = []
+    for index, own in enumerate(per_seed):
+        others = (
+            set().union(
+                *(other for i, other in enumerate(per_seed) if i != index)
+            )
+            if len(per_seed) > 1
+            else set()
+        )
+        distinctive.append(own - others)
+    return distinctive
+
+
+# Which seeds a track reflects, by its tags. A track can reflect several seeds
+# at once that is a bridge result, not an error
+def seeds_matched_by_track(track_tags: list, distinctive: list) -> set:
+    tags = {normalize_tag(t.lower()) for t in track_tags}
+    return {
+        index for index, seed_tags in enumerate(distinctive) if tags & seed_tags
+    }

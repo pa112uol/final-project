@@ -34,7 +34,7 @@ async def accumulate_artist_scores_from_tag_page(
             tag_already_credited = tag in artist_tags[key]
             artist_tags[key].add(tag)
             # Rank is page-local, so offset by the page to get the artist's
-            # global rank within the tag -- otherwise the first artist on
+            # global rank within the tag otherwise the first artist on
             # page 2 is scored as strongly as the tag's single top artist.
             rank_decay = _rank_decay(page_idx * ARTISTS_PER_TAG + rank)
             if key in artist_scores:

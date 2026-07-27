@@ -64,7 +64,9 @@ class TestScoreAndSort:
     def test_returns_empty_array_for_empty_input(self):
         assert score_and_sort([], 0) == []
 
-    def test_normalizes_final_score_to_zero_one_range_for_single_candidate(self):
+    def test_normalizes_final_score_to_zero_one_range_for_single_candidate(
+        self,
+    ):
         result = score_and_sort([make_candidate(tag_weight_sum=50)], 0)
         assert result[0].final_score >= 0
         assert result[0].final_score <= 1
@@ -88,7 +90,10 @@ class TestScoreAndSort:
     def test_at_novelty_one_more_obscure_candidate_scores_higher(self):
         # popular has huge listen count, obscure has tiny listen count
         popular = make_candidate(
-            tag_weight_sum=100, listen_count=1_000_000, user_count=500_000, mbid="popular"
+            tag_weight_sum=100,
+            listen_count=1_000_000,
+            user_count=500_000,
+            mbid="popular",
         )
         obscure = make_candidate(
             tag_weight_sum=100, listen_count=10, user_count=5, mbid="obscure"
@@ -96,13 +101,17 @@ class TestScoreAndSort:
         result = score_and_sort([popular, obscure], 1)
         assert result[0].mbid == "obscure"
 
-    def test_assigns_neutral_obscurity_to_candidates_with_no_popularity_data(self):
+    def test_assigns_neutral_obscurity_to_candidates_with_no_popularity_data(
+        self,
+    ):
         # Two known candidates bracket the obscurity range. Unknown gets median.
         popular = make_candidate(
             listen_count=1_000_000, user_count=500_000, mbid="popular"
         )
         niche = make_candidate(listen_count=1_000, user_count=500, mbid="niche")
-        unknown = make_candidate(listen_count=0, artist_listen_count=0, mbid="unknown")
+        unknown = make_candidate(
+            listen_count=0, artist_listen_count=0, mbid="unknown"
+        )
         result = score_and_sort([popular, niche, unknown], 0.5)
         unknown_result = next(r for r in result if r.mbid == "unknown")
         # Neutral median lands strictly between the min and max after normalization
@@ -116,10 +125,16 @@ class TestScoreAndSort:
 
     def test_penalizes_candidates_with_no_track_tag_match(self):
         with_tag_match = make_candidate(
-            tag_weight_sum=100, track_tag_score=50, listen_count=0, mbid="matched"
+            tag_weight_sum=100,
+            track_tag_score=50,
+            listen_count=0,
+            mbid="matched",
         )
         no_tag_match = make_candidate(
-            tag_weight_sum=100, track_tag_score=0, listen_count=0, mbid="unmatched"
+            tag_weight_sum=100,
+            track_tag_score=0,
+            listen_count=0,
+            mbid="unmatched",
         )
         result = score_and_sort([with_tag_match, no_tag_match], 0)
         assert result[0].mbid == "matched"
@@ -127,7 +142,7 @@ class TestScoreAndSort:
 
     def test_track_tag_score_zero_fallback_is_half_artist_norm(self):
         # Candidate A: trackTagScore matches half of max
-        # Candidate B: no match -- fallback is 0.5 * artist_norm
+        # Candidate B: no match - fallback is 0.5 * artist_norm
         # At 60/40 blend and max tagWeightSum=100:
         # A: artistNorm=1, trackTagNorm=1 => relevance=1.0
         # B: artistNorm=1, trackTagNorm=0.5 (fallback) => relevance=0.8

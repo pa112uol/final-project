@@ -5,10 +5,16 @@ Mirrors eval.test.ts: recall, MRR, leave-one-out stability, novelty effect, MMR 
 Uses a fixed synthetic candidate pool so tests are deterministic and require no network calls.
 """
 import pytest
-from recommendations.tags import build_tag_weights, normalize_tag
+from recommendations.tags import (
+    build_tag_weights,
+    normalize_tag,
+    distinctive_tags_per_seed,
+    seeds_matched_by_track,
+)
 from recommendations.scoring import score_and_sort
 from recommendations.diversify import mmr_select, jaccard_sets, tokenize
 from recommendations.types import Candidate, ScoredCandidate, LFTag
+from recommendations.utils import get_field
 
 
 # Fraction of the relevant set that appears in the top k positions
@@ -39,6 +45,35 @@ def intralist_diversity(tracks: list) -> float:
             total += 1 - jaccard_sets(sets[i], sets[j])
             pairs += 1
     return total / pairs
+
+
+def seed_match_counts(tracks: list, distinctive: list) -> list:
+    counts = [0] * len(distinctive)
+    for track in tracks:
+        for index in seeds_matched_by_track(track.tags, distinctive):
+            counts[index] += 1
+    return counts
+
+
+# Fraction of seeds that at least one result reflects. A two-seed query whose
+# results all come from one seed's genre scores 0.5 no matter how good they are
+def seed_coverage(tracks: list, distinctive: list) -> float:
+    if not distinctive:
+        return 0.0
+    return sum(1 for count in seed_match_counts(tracks, distinctive) if count) / len(
+        distinctive
+    )
+
+
+# How evenly the results split across seeds: 1.0 when every seed is reflected by
+# equally many tracks, 0.0 when any seed is shut out entirely
+def seed_balance(tracks: list, distinctive: list) -> float:
+    if not distinctive:
+        return 0.0
+    counts = seed_match_counts(tracks, distinctive)
+    if max(counts) == 0:
+        return 0.0
+    return min(counts) / max(counts)
 
 
 def apply_track_tag_scores(candidates: list, tag_weights: dict) -> list:
@@ -182,3 +217,85 @@ class TestMmrDiversity:
         cluster_b = make_cluster("B", ["post punk", "gothic"], 0.75, 3)
         ranked = sorted(cluster_a + cluster_b, key=lambda x: x.final_score, reverse=True)
         assert mmr_select(ranked, 4)[0].mbid == "A1"
+
+
+# Two seeds that share "rock" but diverge on their distinctive genre tags,
+# mirroring the real failure case: a funk seed paired with a grunge seed
+FUNK_SEED = [LFTag(name="rock", count=100), LFTag(name="funk", count=40)]
+GRUNGE_SEED = [LFTag(name="rock", count=100), LFTag(name="grunge", count=40)]
+
+
+def make_track(artist: str, tags: list) -> ScoredCandidate:
+    return ScoredCandidate(
+        title=f"{artist} song", artist=artist, artist_mbid="a", mbid=f"m-{artist}",
+        duration_ms=None, tag_weight_sum=1, track_tag_score=1, listen_count=1,
+        user_count=1, artist_listen_count=0, tags=tags,
+    )
+
+
+class TestDistinctiveTagsPerSeed:
+    def test_drops_tags_shared_by_every_seed(self):
+        distinctive = distinctive_tags_per_seed([FUNK_SEED, GRUNGE_SEED])
+        assert distinctive == [{"funk"}, {"grunge"}]
+
+    def test_keeps_all_tags_for_a_single_seed(self):
+        assert distinctive_tags_per_seed([FUNK_SEED]) == [{"rock", "funk"}]
+
+    def test_returns_empty_for_no_seeds(self):
+        assert distinctive_tags_per_seed([]) == []
+
+    def test_ignores_long_tail_tags_outside_each_seed_top_n(self):
+        # Only the strongest tags characterise a seed; rare tags no candidate
+        # carries would otherwise dominate the "distinctive" set
+        seed_a = [LFTag(name="funk", count=90), LFTag(name="bristol sound", count=1)]
+        seed_b = [LFTag(name="grunge", count=90), LFTag(name="anxious", count=1)]
+        distinctive = distinctive_tags_per_seed([seed_a, seed_b], top_n=1)
+        assert distinctive == [{"funk"}, {"grunge"}]
+
+
+class TestSeedCoverage:
+    @pytest.fixture
+    def distinctive(self):
+        return distinctive_tags_per_seed([FUNK_SEED, GRUNGE_SEED])
+
+    def test_scores_one_when_every_seed_is_represented(self, distinctive):
+        tracks = [make_track("A", ["funk"]), make_track("B", ["grunge"])]
+        assert seed_coverage(tracks, distinctive) == 1.0
+
+    def test_scores_half_when_one_seed_is_shut_out(self, distinctive):
+        # The real regression: a two-seed query collapsing to one seed's genre
+        tracks = [make_track("A", ["grunge"]), make_track("B", ["grunge"])]
+        assert seed_coverage(tracks, distinctive) == 0.5
+
+    def test_scores_zero_when_results_match_no_seed(self, distinctive):
+        assert seed_coverage([make_track("A", ["techno"])], distinctive) == 0.0
+
+    def test_counts_a_track_matching_both_seeds_for_each(self, distinctive):
+        tracks = [make_track("A", ["funk", "grunge"])]
+        assert seed_coverage(tracks, distinctive) == 1.0
+
+
+class TestSeedBalance:
+    @pytest.fixture
+    def distinctive(self):
+        return distinctive_tags_per_seed([FUNK_SEED, GRUNGE_SEED])
+
+    def test_scores_one_for_an_even_split(self, distinctive):
+        tracks = [make_track("A", ["funk"]), make_track("B", ["grunge"])]
+        assert seed_balance(tracks, distinctive) == 1.0
+
+    def test_scores_zero_when_a_seed_gets_nothing(self, distinctive):
+        tracks = [make_track("A", ["grunge"]), make_track("B", ["grunge"])]
+        assert seed_balance(tracks, distinctive) == 0.0
+
+    def test_penalizes_a_lopsided_split(self, distinctive):
+        tracks = [
+            make_track("A", ["funk"]),
+            make_track("B", ["grunge"]),
+            make_track("C", ["grunge"]),
+            make_track("D", ["grunge"]),
+        ]
+        assert seed_balance(tracks, distinctive) == pytest.approx(1 / 3)
+
+    def test_scores_zero_when_nothing_matches(self, distinctive):
+        assert seed_balance([make_track("A", ["techno"])], distinctive) == 0.0

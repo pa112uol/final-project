@@ -23,7 +23,7 @@ def _load_env():
     """Load env vars from the standard locations, closest file wins."""
     backend_dir = Path(__file__).resolve().parent.parent
     candidates = [
-        # backend/.env -- primary env file
+        # backend/.env
         backend_dir / ".env",
         # backend/.env.local
         backend_dir / ".env.local",
@@ -125,7 +125,7 @@ def print_quality(report: dict, tracks: list):
     print("  results:")
     for i, t in enumerate(tracks):
         print(
-            f'[{i + 1}] "{t.title}" -- {t.artist}'
+            f'[{i + 1}] "{t.title}" - {t.artist}'
             f"  rel:{t.relevance_score:.3f} nov:{t.novelty_score:.3f}"
         )
     print("=" * 60)
@@ -302,7 +302,7 @@ def novelty_gradient_tracks():
     return t0, t5, t1
 
 
-# UserSim A -- Mainstream synth-pop: "Blinding Lights" -- The Weeknd
+# UserSim A - Mainstream synth-pop: "Blinding Lights" - The Weeknd
 
 
 class TestUserSimA:
@@ -342,7 +342,7 @@ class TestUserSimA:
         assert report["relevance_spread"] >= 0.2
 
 
-# UserSim B -- Hip-hop: "HUMBLE." -- Kendrick Lamar
+# UserSim B - Hip-hop: "HUMBLE." - Kendrick Lamar
 
 
 class TestUserSimB:
@@ -381,7 +381,7 @@ class TestUserSimB:
         assert report["avg_relevance"] >= 0.3
 
 
-# UserSim C -- Classic rock: "Stairway to Heaven" -- Led Zeppelin
+# UserSim C - Classic rock: "Stairway to Heaven" - Led Zeppelin
 
 
 class TestUserSimC:
@@ -418,7 +418,7 @@ class TestUserSimC:
         assert report["unique_artists"] >= 5
 
 
-# UserSim D -- Ultra-niche: "Alien Observer" -- Grouper
+# UserSim D - Ultra-niche: "Alien Observer" - Grouper
 
 
 class TestUserSimD:
@@ -453,7 +453,7 @@ class TestUserSimD:
         assert report["tracks_with_zero_relevance"] == 0
 
 
-# UserSim E -- Multi-seed indie: The National + Bon Iver
+# UserSim E - Multi-seed indie: The National + Bon Iver
 
 
 class TestUserSimE:
@@ -515,7 +515,7 @@ class TestUserSimE:
             assert has_bon is False
 
 
-# UserSim F -- Novelty gradient: 0 vs 0.5 vs 1, "Teardrop" -- Massive Attack
+# UserSim F - Novelty gradient: 0 vs 0.5 vs 1, "Teardrop" - Massive Attack
 
 
 class TestUserSimF:

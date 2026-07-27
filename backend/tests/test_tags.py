@@ -4,10 +4,13 @@ from recommendations.tags import (
     merge_tags,
     build_tag_weights,
     is_noise_tag,
+    distinctive_tags_per_seed,
+    seeds_matched_by_track,
     NOISE_TAGS,
     BROAD_FETCH_TAGS,
     MOOD_TAGS,
 )
+from recommendations.types import LFTag
 from recommendations.constants import LB_SOURCE_WEIGHT, TAG_COUNT_SCALE
 
 
@@ -173,3 +176,40 @@ class TestBuildTagWeights:
         weights = build_tag_weights(seed_tag_sets)
         # After normalization both resolve to "post punk"; should result in one entry
         assert len(weights) == 1
+
+
+class TestDistinctiveTagsPerSeed:
+    def test_drops_tags_shared_by_every_seed(self):
+        funk = [LFTag(name="rock", count=100), LFTag(name="funk", count=40)]
+        grunge = [LFTag(name="rock", count=100), LFTag(name="grunge", count=40)]
+        assert distinctive_tags_per_seed([funk, grunge]) == [{"funk"}, {"grunge"}]
+
+    def test_keeps_all_tags_for_a_single_seed(self):
+        seed = [LFTag(name="rock", count=100), LFTag(name="funk", count=40)]
+        assert distinctive_tags_per_seed([seed]) == [{"rock", "funk"}]
+
+    def test_ignores_long_tail_tags_outside_each_seed_top_n(self):
+        # Only the strongest tags characterise a seed; a rare tag no candidate
+        # carries would otherwise dominate the distinctive set
+        a = [LFTag(name="funk", count=90), LFTag(name="bristol sound", count=1)]
+        b = [LFTag(name="grunge", count=90), LFTag(name="anxious", count=1)]
+        assert distinctive_tags_per_seed([a, b], top_n=1) == [{"funk"}, {"grunge"}]
+
+    def test_returns_empty_for_no_seeds(self):
+        assert distinctive_tags_per_seed([]) == []
+
+
+class TestSeedsMatchedByTrack:
+    def test_matches_the_seed_whose_distinctive_tag_it_carries(self):
+        distinctive = [{"funk"}, {"grunge"}]
+        assert seeds_matched_by_track(["funk", "jam"], distinctive) == {0}
+
+    def test_matches_multiple_seeds_for_a_bridge_track(self):
+        distinctive = [{"funk"}, {"grunge"}]
+        assert seeds_matched_by_track(["funk", "grunge"], distinctive) == {0, 1}
+
+    def test_matches_nothing_when_no_distinctive_tag_present(self):
+        assert seeds_matched_by_track(["techno"], [{"funk"}, {"grunge"}]) == set()
+
+    def test_normalizes_hyphens_before_matching(self):
+        assert seeds_matched_by_track(["post-punk"], [{"post punk"}]) == {0}

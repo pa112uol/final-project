@@ -1,12 +1,15 @@
 import asyncio
 import logging
 import math
+import os
 from .types import Track, Release
 from .candidates import build_candidates
 from .tags import (
     build_tag_weights,
     merge_tags,
     rank_tags_per_seed,
+    distinctive_tags_per_seed,
+    seeds_matched_by_track,
     MOOD_TAGS,
     normalize_tag,
     is_noise_tag,
@@ -14,7 +17,7 @@ from .tags import (
 )
 from .dedup import filter_seeds, deduplicate_by_mbid, deduplicate_by_title
 from .scoring import score_and_sort
-from .diversify import mmr_select
+from .diversify import mmr_select, mmr_select_balanced
 from .constants import (
     RECOMMENDATION_LIMIT,
     TOP_TAGS_COUNT,
@@ -24,6 +27,38 @@ from .constants import (
 from .utils import get_field, set_field
 
 logger = logging.getLogger(__name__)
+
+
+# Opt-in per-seed slot quota at final selection. Off by default so behaviour is
+# unchanged unless explicitly enabled
+def _seed_balanced_enabled() -> bool:
+    return os.environ.get("RECS_SEED_BALANCED", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+# Select the final RECOMMENDATION_LIMIT tracks, optionally guaranteeing each
+# seed a share of the slots when the feature is enabled and there is more than
+# one seed
+def select_final_tracks(pre_mmr, seed_tag_sets, limit):
+    if _seed_balanced_enabled() and len(seed_tag_sets) > 1:
+        distinctive = distinctive_tags_per_seed(seed_tag_sets)
+
+        def seed_ids_of(candidate):
+            return seeds_matched_by_track(
+                get_field(candidate, "tags"), distinctive
+            )
+
+        logger.info(
+            "[pipeline:mmr] seed-balanced selection, distinctive tag sizes:%s",
+            [len(d) for d in distinctive],
+        )
+        return mmr_select_balanced(
+            pre_mmr, limit, seed_ids_of, len(seed_tag_sets)
+        )
+    return mmr_select(pre_mmr, limit)
 
 
 # Log the tags associated with a seed
@@ -93,9 +128,9 @@ def _is_specific_tag(tag, seed_artist_names):
 # Interleave each seed's own top specific tags so every seed gets a share of
 # the fetch budget. A global top-K over the pooled profile can be won outright
 # by one seed: seeds usually agree only on broad tags ("rock"), which are
-# filtered here, leaving single-seed tags whose IDF term is then a constant --
+# filtered here, leaving single-seed tags whose IDF term is then a constant -
 # so the pooled ranking degenerates into raw tag counts and a two-seed query
-# silently becomes a one-seed query.
+# silently becomes a one-seed query
 def _round_robin_seed_tags(per_seed_tags, weight_of, seed_artist_names):
     queues = [
         [t for t in tags if _is_specific_tag(t, seed_artist_names)]
@@ -137,9 +172,7 @@ def select_fetch_tags(sorted_tags, seed_artist_names, per_seed_tags=None):
     if not per_seed_tags or len(per_seed_tags) < 2:
         return specific_tags[:TOP_TAGS_COUNT]
 
-    weight_of = {
-        normalize_tag(tag).lower(): w for tag, w in sorted_tags
-    }
+    weight_of = {normalize_tag(tag).lower(): w for tag, w in sorted_tags}
     chosen, seen = _round_robin_seed_tags(
         per_seed_tags, weight_of, seed_artist_names
     )
@@ -153,12 +186,11 @@ def select_fetch_tags(sorted_tags, seed_artist_names, per_seed_tags=None):
     return chosen
 
 
-# Cosine similarity between the candidate's (binary) tag vector and the
-# weighted seed profile. A raw weight sum rewards a candidate for merely
-# carrying more tags -- and LF enrichment adds tags to some candidates and not
-# others -- so dividing by the vector length removes that bias. The seed
-# profile's norm is constant across candidates and so is omitted; it would
-# scale every score identically without changing the ranking.
+# Cosine similarity between the candidate's binary tag vector and the weighted
+# seed profile. Dividing by the vector length stops a candidate scoring highly
+# for merely carrying more tags which matters because LF enrichment tags some
+# candidates and not others. The seed profile's norm is omitted since it is
+# constant across candidates, so it would scale every score alike without reranking
 def compute_track_tag_score(tags, normalized_tag_weights):
     if not tags:
         return 0.0
@@ -178,6 +210,8 @@ def score_candidates_by_seed_tags(candidates, normalized_tag_weights):
         set_field(c, "track_tag_score", score)
 
 
+# Deduplicate candidates by seed filtering, MBID, and title. Log the number of
+# candidates removed at each stage for visibility into the pipeline's behaviour
 def filter_and_deduplicate_candidates(
     raw_candidates, seeds, exclude_seed_artists
 ):
@@ -232,14 +266,12 @@ async def enrich_candidate_with_lf_tags(
     return True
 
 
-# Enrich all candidates with LF track tags.
-# 1) It fills coverage gaps: candidates come from ListenBrainz, whose tag data
-# is intermittent and thin for less popular recordings. (Note LB tags are not
-# genre-only -- the recording scope does carry mood words like "mellow" and
-# "bittersweet" -- so this is about coverage, not about mood specifically.)
-# 2) It provides track-level signal for same-artist tie-breaking that the shared
-# artist tag_weight_sum cannot resolve
-# Tags are merged rather than replaced so LB genre labels are preserved for MMR.
+# Enrich all candidates with LF track tags. Candidates come from ListenBrainz,
+# whose tag data is intermittent and thin for less popular recordings, and LF
+# also adds track-level signal for the same-artist tie-breaking that a shared
+# artist tag_weight_sum cannot resolve. The gap is coverage rather than mood,
+# since LB recording tags do carry mood words like "mellow". Tags are merged
+# rather than replaced so LB genre labels survive for MMR
 async def enrich_candidates_with_lf_tags(
     candidates, clients, api_key, normalized_tag_weights
 ):
@@ -467,7 +499,7 @@ async def run_pipeline(
         RECOMMENDATION_LIMIT,
         len(pre_mmr),
     )
-    top = mmr_select(pre_mmr, RECOMMENDATION_LIMIT)
+    top = select_final_tracks(pre_mmr, seed_tag_sets, RECOMMENDATION_LIMIT)
     _log_final_candidates(top)
 
     return list(

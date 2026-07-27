@@ -1,3 +1,4 @@
+import math
 from .constants import MMR_LAMBDA
 from .utils import get_field
 
@@ -51,19 +52,76 @@ def _pick_best(remaining: list, selected: list) -> int:
     return best_idx
 
 
-def mmr_select(ranked: list, k: int) -> list:
-    remaining = [
+def _prepare_items(ranked: list, seed_ids_of=None) -> list:
+    return [
         {
             "c": c,
             "tokens": tokenize(get_field(c, "tags")),
             "artist": (get_field(c, "artist") or "").lower(),
+            "seeds": seed_ids_of(c) if seed_ids_of else set(),
         }
         for c in ranked
     ]
+
+
+# Pick the candidate with the best MMR score, then repeat until k are selected.
+# MMR balances relevance or final_score against diversity or max similarity
+# to already-selected candidates
+def mmr_select(ranked: list, k: int) -> list:
+    remaining = _prepare_items(ranked)
     selected = []
 
     while len(selected) < k and remaining:
         best_idx = _pick_best(remaining, selected)
         selected.append(remaining.pop(best_idx))
+
+    return [item["c"] for item in selected]
+
+
+# The seed each unmet slot must be filled from: the one furthest below its quota
+# that still has a matching candidate left. Returns None once every seed has met
+# quota or none of the deficit seeds have candidates remaining
+def _needy_seed(remaining: list, counts: list, target: int) -> int | None:
+    deficit_seeds = sorted(
+        (s for s in range(len(counts)) if counts[s] < target),
+        key=lambda s: counts[s],
+    )
+    for seed in deficit_seeds:
+        if any(seed in item["seeds"] for item in remaining):
+            return seed
+    return None
+
+
+# MMR selection that guarantees each seed a share of the slots. Plain MMR ranks
+# on one pooled score, so a cross-genre pair's dominant seed out-scores the
+# other and can take every slot, the measured failure where a two seed query
+# returns nothing from one seed. Here each step fills the most under quota seed
+# from its own candidates, still by MMR score so relevance and diversity decide
+# within a seed, then falls back to global MMR once quotas are met
+def mmr_select_balanced(
+    ranked: list, k: int, seed_ids_of, seed_count: int
+) -> list:
+    if seed_count <= 1:
+        return mmr_select(ranked, k)
+
+    remaining = _prepare_items(ranked, seed_ids_of)
+    selected = []
+    target = math.ceil(k / seed_count)
+    counts = [0] * seed_count
+
+    while len(selected) < k and remaining:
+        seed = _needy_seed(remaining, counts, target)
+        if seed is None:
+            pool = remaining
+        else:
+            pool = [item for item in remaining if seed in item["seeds"]]
+        best = pool[_pick_best(pool, selected)]
+        # Identity, not equality: two candidates could compare equal as
+        # dataclasses, and remove() would drop the wrong one.
+        remaining = [item for item in remaining if item is not best]
+        selected.append(best)
+        for matched in best["seeds"]:
+            if matched < seed_count:
+                counts[matched] += 1
 
     return [item["c"] for item in selected]

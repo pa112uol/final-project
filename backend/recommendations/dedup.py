@@ -73,7 +73,7 @@ def _title_variant_wins(candidate, prev) -> bool:
 # Collapse variant recordings (remaster/live/single editions) that share a
 # normalized title + artist but carry distinct MBIDs which deduplicate_by_mbid
 # cannot catch. Keep the variant with an MBID (enables popularity lookup),
-# then the one with more listens.
+# then the one with more listens
 def deduplicate_by_title(candidates: list) -> list:
     kept = {}
     for c in candidates:

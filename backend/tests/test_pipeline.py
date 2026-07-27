@@ -12,7 +12,9 @@ def make_streaming():
     )
 
 
-def make_resolved(mbid, duration_ms=None, album=None, release_mbid=None, release_date=None):
+def make_resolved(
+    mbid, duration_ms=None, album=None, release_mbid=None, release_date=None
+):
     return {
         "mbid": mbid,
         "duration_ms": duration_ms,
@@ -240,7 +242,9 @@ class TestRunPipeline:
         assert tracks
         assert all(t.duration_ms == 232000 for t in tracks)
 
-    async def test_populates_album_and_release_date_from_resolved_recording(self):
+    async def test_populates_album_and_release_date_from_resolved_recording(
+        self,
+    ):
         class AlbumClients(make_clients().__class__):
             async def resolve_recording_mbid(self, mbid, title, artist):
                 return make_resolved(
@@ -261,7 +265,9 @@ class TestRunPipeline:
             assert t.releases[0].title == "Souvlaki"
             assert t.releases[0].date == "1993-05-17"
 
-    async def test_leaves_releases_empty_when_resolved_recording_has_no_album(self):
+    async def test_leaves_releases_empty_when_resolved_recording_has_no_album(
+        self,
+    ):
         tracks = await run_pipeline(
             [TEST_SEED], "fake-api-key", None, 0, make_clients()
         )
@@ -455,7 +461,7 @@ class TestRunPipeline:
     async def test_keeps_zero_tag_score_tracks_when_filtering_would_leave_fewer_than_limit(
         self,
     ):
-        # 3 distinct artists with non-matching tags -- pool stays below RECOMMENDATION_LIMIT (10)
+        # 3 distinct artists with non-matching tags - pool stays below RECOMMENDATION_LIMIT (10)
         class SmallPoolClients(make_clients().__class__):
             async def fetch_tag_artists(self, tag, page, limit, api_key):
                 return [
@@ -482,5 +488,5 @@ class TestRunPipeline:
         tracks = await run_pipeline(
             [TEST_SEED], "fake-api-key", None, 0, SmallPoolClients()
         )
-        # Pool too small to filter -- all 3 tracks survive
+        # Pool too small to filter all 3 tracks survive
         assert len(tracks) == 3

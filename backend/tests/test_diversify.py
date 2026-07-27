@@ -1,5 +1,10 @@
 import pytest
-from recommendations.diversify import tokenize, jaccard_sets, mmr_select
+from recommendations.diversify import (
+    tokenize,
+    jaccard_sets,
+    mmr_select,
+    mmr_select_balanced,
+)
 from recommendations.types import ScoredCandidate
 
 
@@ -139,3 +144,69 @@ class TestMmrSelect:
         result = mmr_select(ranked, 2)
         assert result[0].mbid == "best"
         assert result[1].mbid == "other-artist"
+
+
+class TestMmrSelectBalanced:
+    # seed_ids_of built from a static map keyed by mbid, so tests can assign
+    # each candidate to whichever seed(s) they need
+    def _seed_ids_of(self, mapping):
+        return lambda c: mapping.get(c.mbid, set())
+
+    def test_guarantees_each_seed_a_slot_even_when_one_seed_dominates_scores(self):
+        # Seed 0 owns the five highest scores; plain MMR would fill all slots
+        # with it. Balanced selection must still seat seed 1.
+        seed0 = [
+            make_scored_candidate(mbid=f"a{i}", artist=f"A{i}",
+                                  final_score=0.9 - i * 0.05, tags=["funk"])
+            for i in range(5)
+        ]
+        seed1 = make_scored_candidate(
+            mbid="b1", artist="B", final_score=0.3, tags=["grunge"]
+        )
+        mapping = {**{f"a{i}": {0} for i in range(5)}, "b1": {1}}
+        result = mmr_select_balanced(
+            seed0 + [seed1], 4, self._seed_ids_of(mapping), seed_count=2
+        )
+        mbids = {c.mbid for c in result}
+        assert "b1" in mbids
+
+    def test_splits_slots_evenly_when_both_seeds_have_candidates(self):
+        cands = (
+            [make_scored_candidate(mbid=f"a{i}", artist=f"A{i}",
+                                   final_score=0.9 - i * 0.05, tags=["funk"])
+             for i in range(5)]
+            + [make_scored_candidate(mbid=f"b{i}", artist=f"B{i}",
+                                     final_score=0.4 - i * 0.05, tags=["grunge"])
+               for i in range(5)]
+        )
+        mapping = {**{f"a{i}": {0} for i in range(5)},
+                   **{f"b{i}": {1} for i in range(5)}}
+        result = mmr_select_balanced(cands, 4, self._seed_ids_of(mapping), 2)
+        from_seed0 = sum(1 for c in result if c.mbid.startswith("a"))
+        from_seed1 = sum(1 for c in result if c.mbid.startswith("b"))
+        assert from_seed0 == 2 and from_seed1 == 2
+
+    def test_falls_back_to_pooled_mmr_when_a_seed_has_no_candidates(self):
+        # Seed 1 unrepresented in the pool; selection should still return k
+        # tracks rather than stalling
+        cands = [
+            make_scored_candidate(mbid=f"a{i}", artist=f"A{i}",
+                                  final_score=0.9 - i * 0.1, tags=["funk"])
+            for i in range(4)
+        ]
+        mapping = {f"a{i}": {0} for i in range(4)}
+        result = mmr_select_balanced(cands, 3, self._seed_ids_of(mapping), 2)
+        assert len(result) == 3
+
+    def test_single_seed_matches_plain_mmr(self):
+        cands = [
+            make_scored_candidate(mbid=f"m{i}", artist=f"A{i}",
+                                  final_score=0.9 - i * 0.1, tags=["funk"])
+            for i in range(5)
+        ]
+        balanced = mmr_select_balanced(cands, 3, lambda c: {0}, seed_count=1)
+        plain = mmr_select(cands, 3)
+        assert [c.mbid for c in balanced] == [c.mbid for c in plain]
+
+    def test_returns_empty_for_empty_input(self):
+        assert mmr_select_balanced([], 5, lambda c: set(), 2) == []

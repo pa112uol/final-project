@@ -6,18 +6,16 @@ from .http import get_client
 
 LB_BASE = "https://api.listenbrainz.org/1"
 
-# The metadata endpoint returns tags at three scopes, and their counts are not
-# comparable: artist tags accumulate votes across a whole discography, so they
-# dwarf a single recording's. Summing them raw makes a seed profile describe
-# the artist rather than the track -- for "Californication", 22 of the 31
-# "funk rock" votes are artist-level and only 1 is the recording's, while the
-# song's own character (mellow, melancholic) sits at 1-2. Down-weighting the
-# broader scopes keeps them as context without letting them dominate.
-# The artist weight is a balance, not a minimisation: recording-scope counts
-# are sparse (often 1-2 votes), so discounting artist scope too hard leaves the
-# profile thin enough for one tag to dominate. At 0.15 this query lost "grunge"
-# entirely and returned AC/DC and Kiss; 0.3 keeps each seed's distinctive tags
-# while cutting pure artist-bleed tags like "rap rock" to a minor contribution.
+# The endpoint returns tags at three scopes whose counts are not comparable:
+# artist tags accumulate votes across a whole discography, so summing them raw
+# makes a seed profile describe the artist rather than the track. For
+# "Californication" 22 of the 31 "funk rock" votes are artist-level and 1 the
+# recording's, while the song's own character (mellow, melancholic) sits at
+# 1-2. Down-weighting is a balance rather than a minimisation, since recording
+# counts are sparse enough that discounting artist scope too hard leaves one
+# tag dominating a thin profile: at 0.15 this query lost "grunge" and returned
+# AC/DC and Kiss, whereas 0.3 keeps each seed's distinctive tags and cuts
+# artist-bleed like "rap rock" to a minor contribution.
 TAG_LEVEL_WEIGHTS = {
     "recording": 1.0,
     "release_group": 0.4,
