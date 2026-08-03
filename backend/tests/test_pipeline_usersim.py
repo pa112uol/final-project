@@ -18,6 +18,10 @@ import pytest
 from recommendations.index import get_recommendations
 from recommendations.types import Track
 
+# Uses real Last.fm/MusicBrainz/ListenBrainz APIs and takes minutes to run
+# (serialised MusicBrainz rate limiting), excluded from the default test run
+pytestmark = pytest.mark.slow
+
 
 def _load_env():
     """Load env vars from the standard locations, closest file wins."""
