@@ -13,6 +13,7 @@ from recommendations.tags import (
 )
 from recommendations.scoring import score_and_sort
 from recommendations.diversify import mmr_select, jaccard_sets, tokenize
+from recommendations.mood import apply_mood_scores, mood_match_score
 from recommendations.types import Candidate, ScoredCandidate, LFTag
 from recommendations.utils import get_field
 
@@ -45,6 +46,25 @@ def intralist_diversity(tracks: list) -> float:
             total += 1 - jaccard_sets(sets[i], sets[j])
             pairs += 1
     return total / pairs
+
+
+# Fraction of the top k that actually express the requested mood. The blunt
+# half of the pair: it says whether mood reached the results at all
+def mood_precision_at_k(ranked: list, mood: str, k: int) -> float:
+    top = ranked[:k]
+    if not top:
+        return 0.0
+    return sum(1 for c in top if mood_match_score(c.tags, mood) > 0) / len(top)
+
+
+# Mean mood score across the top k. Rewards how strongly results match rather
+# than just whether they do, and goes negative when results actively
+# contradict the mood - the count-based metric cannot see either
+def mean_mood_score_at_k(ranked: list, mood: str, k: int) -> float:
+    top = ranked[:k]
+    if not top:
+        return 0.0
+    return sum(mood_match_score(c.tags, mood) for c in top) / len(top)
 
 
 def seed_match_counts(tracks: list, distinctive: list) -> list:
@@ -299,3 +319,144 @@ class TestSeedBalance:
 
     def test_scores_zero_when_nothing_matches(self, distinctive):
         assert seed_balance([make_track("A", ["techno"])], distinctive) == 0.0
+
+
+# Every candidate carries the same two seed tags, the same artist coverage
+# score and the same popularity, so relevance and obscurity tie across the
+# whole pool and the mood term is the only thing that can reorder it. The
+# third tag is the only variable: two canonical chill words, one weaker
+# related word, two mood-neutral genre words, and one that means the opposite.
+# None of the third tags appear in SEED_TAG_SETS, so none of them shift
+# track_tag_score. Neutral and opposing tracks are listed first because
+# score_and_sort's sort is stable: with no mood requested every score ties and
+# the pool keeps this order, which is what makes the no-mood baseline 0
+def make_mood_candidate(mbid: str, third_tag: str) -> Candidate:
+    return Candidate(
+        title=f"Track {mbid}", artist=f"Artist {mbid}", artist_mbid=f"a-{mbid}",
+        mbid=mbid, duration_ms=None, tag_weight_sum=100, track_tag_score=0,
+        listen_count=10000, user_count=5000, artist_listen_count=0,
+        tags=["shoegaze", "dreampop", third_tag],
+    )
+
+
+MOOD_CANDIDATE_POOL = [
+    make_mood_candidate("neutral-1", "post punk"),
+    make_mood_candidate("neutral-2", "gothic"),
+    make_mood_candidate("opposing", "aggressive"),
+    make_mood_candidate("canonical", "mellow"),
+    make_mood_candidate("related-strong", "chillout"),
+    make_mood_candidate("related-weak", "downtempo"),
+]
+
+def mood_ranked_pool(mood, novelty: float = 0.0) -> list:
+    tag_weights = build_tag_weights(SEED_TAG_SETS)
+    pool = apply_track_tag_scores(MOOD_CANDIDATE_POOL, tag_weights)
+    apply_mood_scores(pool, mood)
+    return score_and_sort(pool, novelty)
+
+
+class TestMoodPrecisionMetric:
+    def test_scores_one_when_every_result_matches(self):
+        ranked = [make_mood_candidate("m", "chillout")]
+        assert mood_precision_at_k(ranked, "chill", 1) == 1.0
+
+    def test_scores_zero_when_no_result_matches(self):
+        ranked = [make_mood_candidate("n", "post punk")]
+        assert mood_precision_at_k(ranked, "chill", 1) == 0.0
+
+    def test_counts_only_the_top_k(self):
+        ranked = [
+            make_mood_candidate("a", "chillout"),
+            make_mood_candidate("b", "post punk"),
+        ]
+        assert mood_precision_at_k(ranked, "chill", 1) == 1.0
+        assert mood_precision_at_k(ranked, "chill", 2) == 0.5
+
+    def test_k_beyond_the_list_length_uses_what_exists(self):
+        ranked = [make_mood_candidate("a", "chillout")]
+        assert mood_precision_at_k(ranked, "chill", 50) == 1.0
+
+    def test_empty_ranking_scores_zero(self):
+        assert mood_precision_at_k([], "chill", 10) == 0.0
+
+    @pytest.mark.parametrize("mood", [None, "", "banana"])
+    def test_unknown_mood_scores_zero(self, mood):
+        ranked = [make_mood_candidate("m", "chillout")]
+        assert mood_precision_at_k(ranked, mood, 1) == 0.0
+
+
+class TestMeanMoodScoreMetric:
+    def test_grades_a_weak_match_below_a_canonical_one(self):
+        strong = [make_mood_candidate("s", "chillout")]
+        weak = [make_mood_candidate("w", "downtempo")]
+        assert mean_mood_score_at_k(strong, "chill", 1) > mean_mood_score_at_k(
+            weak, "chill", 1
+        )
+
+    def test_goes_negative_when_results_contradict_the_mood(self):
+        opposing = [make_mood_candidate("o", "aggressive")]
+        assert mean_mood_score_at_k(opposing, "chill", 1) < 0
+
+    def test_separates_pools_the_count_metric_rates_equally(self):
+        # Both score 1.0 on precision; only the graded metric tells them apart
+        strong = [make_mood_candidate("s", "chillout")]
+        weak = [make_mood_candidate("w", "downtempo")]
+        assert mood_precision_at_k(strong, "chill", 1) == mood_precision_at_k(
+            weak, "chill", 1
+        )
+        assert mean_mood_score_at_k(strong, "chill", 1) != mean_mood_score_at_k(
+            weak, "chill", 1
+        )
+
+    def test_empty_ranking_scores_zero(self):
+        assert mean_mood_score_at_k([], "chill", 10) == 0.0
+
+
+class TestMoodRankingQuality:
+    def test_requesting_a_mood_fills_the_top_with_on_mood_tracks(self):
+        assert mood_precision_at_k(mood_ranked_pool(None), "chill", 3) == 0.0
+        assert mood_precision_at_k(mood_ranked_pool("chill"), "chill", 3) == 1.0
+
+    def test_requesting_a_mood_raises_the_graded_score(self):
+        without = mean_mood_score_at_k(mood_ranked_pool(None), "chill", 3)
+        with_mood = mean_mood_score_at_k(mood_ranked_pool("chill"), "chill", 3)
+        assert with_mood > without
+
+    def test_stronger_mood_evidence_outranks_weaker(self):
+        order = [c.mbid for c in mood_ranked_pool("chill")]
+        assert order.index("canonical") < order.index("related-weak")
+        assert order.index("related-strong") < order.index("related-weak")
+
+    def test_contradicting_track_sinks_to_the_bottom(self):
+        assert mood_ranked_pool("chill")[-1].mbid == "opposing"
+
+    @pytest.mark.parametrize("novelty", [0.0, 0.5, 1.0])
+    def test_mood_steers_results_at_every_novelty_level(self, novelty):
+        # The regression that motivated this metric: the previous mood
+        # mechanism reached final_score only through the (1 - novelty)
+        # relevance term, so at novelty=1 it reordered nothing at all
+        ranked = mood_ranked_pool("chill", novelty)
+        assert mood_precision_at_k(ranked, "chill", 3) == 1.0
+
+    @pytest.mark.parametrize("novelty", [0.0, 0.5, 1.0])
+    def test_no_mood_leaves_the_ranking_untouched(self, novelty):
+        tag_weights = build_tag_weights(SEED_TAG_SETS)
+        pool = apply_track_tag_scores(MOOD_CANDIDATE_POOL, tag_weights)
+        baseline = score_and_sort(pool, novelty)
+        assert [c.mbid for c in mood_ranked_pool(None, novelty)] == [
+            c.mbid for c in baseline
+        ]
+
+    def test_mood_does_not_pull_in_genre_irrelevant_tracks(self):
+        # Mood must not override relevance: a chill-tagged track from an
+        # unrelated genre still loses to the on-genre pool
+        tag_weights = build_tag_weights(SEED_TAG_SETS)
+        intruder = Candidate(
+            title="Chill Rap", artist="Nobody", artist_mbid="a-x", mbid="off-genre",
+            duration_ms=None, tag_weight_sum=10, track_tag_score=0,
+            listen_count=10000, user_count=5000, artist_listen_count=0,
+            tags=["hip hop", "trap", "chillout"],
+        )
+        pool = apply_track_tag_scores(MOOD_CANDIDATE_POOL + [intruder], tag_weights)
+        apply_mood_scores(pool, "chill")
+        assert score_and_sort(pool, 0)[0].mbid != "off-genre"

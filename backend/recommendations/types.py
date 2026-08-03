@@ -104,6 +104,9 @@ class Candidate:
     user_count: int
     artist_listen_count: int
     tags: list
+    # How strongly the track expresses the requested mood, in [-1, 1]. Stays
+    # 0.0 when no mood was requested, which zeroes the mood term in scoring
+    mood_score: float = 0.0
 
 
 @dataclass

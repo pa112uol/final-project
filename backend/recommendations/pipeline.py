@@ -10,18 +10,17 @@ from .tags import (
     rank_tags_per_seed,
     distinctive_tags_per_seed,
     seeds_matched_by_track,
-    MOOD_TAGS,
     normalize_tag,
     is_noise_tag,
     BROAD_FETCH_TAGS,
 )
+from .mood import apply_mood_scores
 from .dedup import filter_seeds, deduplicate_by_mbid, deduplicate_by_title
 from .scoring import score_and_sort
 from .diversify import mmr_select, mmr_select_balanced
 from .constants import (
     RECOMMENDATION_LIMIT,
     TOP_TAGS_COUNT,
-    MOOD_MULTIPLIER,
     MAX_TRACKS_PER_ARTIST,
 )
 from .utils import get_field, set_field
@@ -308,29 +307,6 @@ async def apply_artist_popularity_fallback(candidates, clients):
                 set_field(c, "artist_listen_count", count)
 
 
-def apply_mood_boost(candidates, mood):
-    if not (mood and MOOD_TAGS.get(mood)):
-        return
-    mood_tag_set = set(MOOD_TAGS[mood])
-    boosted = 0
-    for c in candidates:
-        tags = get_field(c, "tags")
-        if any(t.lower() in mood_tag_set for t in tags):
-            set_field(
-                c,
-                "tag_weight_sum",
-                get_field(c, "tag_weight_sum") * MOOD_MULTIPLIER,
-            )
-            boosted += 1
-    logger.info(
-        '[pipeline:mood] mood="%s" boosted:%d/%d candidates (x%.1f)',
-        mood,
-        boosted,
-        len(candidates),
-        MOOD_MULTIPLIER,
-    )
-
-
 def apply_artist_cap(scored, max_per_artist):
     artist_track_count = {}
     dropped = []
@@ -473,13 +449,14 @@ async def run_pipeline(
     )
 
     # Stage 4: Enrich with track-level tags, then fall back to artist-level
-    # popularity for tracks ListenBrainz has no listen count for, and boost
-    # candidates matching the requested mood
+    # popularity for tracks ListenBrainz has no listen count for, and score
+    # candidates against the requested mood. Mood runs after enrichment because
+    # mood words usually arrive with the Last.fm track tags, not the LB ones
     await enrich_candidates_with_lf_tags(
         candidates, clients, api_key, normalized_tag_weights
     )
     await apply_artist_popularity_fallback(candidates, clients)
-    apply_mood_boost(candidates, mood)
+    apply_mood_scores(candidates, mood)
 
     # Stage 5: Score by relevance/novelty, cap per-artist, floor by tag
     # match then diversify the final selection via MMR

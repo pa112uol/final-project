@@ -156,3 +156,57 @@ class TestScoreAndSort:
         assert result[0].mbid == "max"
         assert result[1].mbid == "zero"
         assert result[1].relevance_score < result[0].relevance_score
+
+
+class TestMoodScoring:
+    def test_mood_score_of_zero_leaves_final_score_untouched(self):
+        # The guarantee that an unmoodied pipeline run is bit-identical: every
+        # candidate carries mood_score 0.0 and the mood term must vanish
+        candidates = [
+            make_candidate(mbid="a", tag_weight_sum=100, listen_count=500),
+            make_candidate(mbid="b", tag_weight_sum=60, listen_count=900),
+            make_candidate(mbid="c", tag_weight_sum=20, listen_count=100),
+        ]
+        for novelty in (0.0, 0.5, 1.0):
+            without = score_and_sort(candidates, novelty)
+            baseline = {c.mbid: c.final_score for c in without}
+            explicit_zero = score_and_sort(
+                [make_candidate(**{**vars(c), "mood_score": 0.0}) for c in candidates],
+                novelty,
+            )
+            assert {c.mbid: c.final_score for c in explicit_zero} == baseline
+
+    def test_positive_mood_score_raises_final_score(self):
+        plain = make_candidate(mbid="plain", tag_weight_sum=100)
+        moody = make_candidate(
+            mbid="moody", tag_weight_sum=100, mood_score=1.0
+        )
+        result = score_and_sort([plain, moody], 0)
+        assert result[0].mbid == "moody"
+        assert result[0].final_score > result[1].final_score
+
+    def test_negative_mood_score_lowers_final_score(self):
+        plain = make_candidate(mbid="plain", tag_weight_sum=100)
+        opposing = make_candidate(
+            mbid="opposing", tag_weight_sum=100, mood_score=-1.0
+        )
+        result = score_and_sort([plain, opposing], 0)
+        assert result[0].mbid == "plain"
+        assert result[1].mbid == "opposing"
+
+    def test_mood_still_applies_at_maximum_novelty(self):
+        # The defect the old multiplier had: it reached final_score only via
+        # the (1 - novelty) relevance term, so at novelty=1 it did nothing
+        plain = make_candidate(
+            mbid="plain", tag_weight_sum=100, listen_count=100
+        )
+        moody = make_candidate(
+            mbid="moody", tag_weight_sum=100, listen_count=100, mood_score=1.0
+        )
+        result = score_and_sort([plain, moody], 1.0)
+        assert result[0].mbid == "moody"
+        assert result[0].final_score > result[1].final_score
+
+    def test_mood_score_survives_conversion_to_scored_candidate(self):
+        result = score_and_sort([make_candidate(mbid="m", mood_score=0.75)], 0)
+        assert result[0].mood_score == 0.75

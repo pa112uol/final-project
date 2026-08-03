@@ -18,7 +18,16 @@ ARTISTS_PER_TAG = 30
 # changed at all
 TOP_ARTISTS_COUNT = 20
 TRACKS_PER_ARTIST = 5
-MOOD_MULTIPLIER = 1.5
+# Mood is added after the novelty blend rather than folded into relevance, so a
+# mood request still steers results at novelty=1 where the relevance term
+# carries no weight at all. 0.25 keeps it a modifier: enough to reorder
+# near-ties, not enough to pull an off-genre track over a strong tag match
+MOOD_SCORE_WEIGHT = 0.25
+# How hard a contradicting mood tag ("aggressive" under a chill request) counts
+# against a candidate, relative to a matching one. Below 1.0 because an
+# opposing tag is weaker evidence than a confirming one: tracks carry many tags
+# and one stray descriptor should demote, not disqualify
+MOOD_CONFLICT_PENALTY = 0.5
 MMR_LAMBDA = 0.7
 MAX_TRACKS_PER_ARTIST = 2
 

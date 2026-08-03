@@ -4,6 +4,7 @@ from .constants import (
     LISTEN_VS_USER_BLEND,
     REC_VS_ARTIST_BLEND,
     ARTIST_VS_TRACK_TAG_BLEND,
+    MOOD_SCORE_WEIGHT,
 )
 from .utils import get_field
 
@@ -113,6 +114,19 @@ def _relevance_for_candidate(c, max_relevance, max_track_tag_score) -> float:
     )
 
 
+# Mood adjusts the blended score rather than relevance itself. Folding it into
+# tag_weight_sum (as the old multiplier did) made a track-level signal scale an
+# artist-level genre score, corrupting relevance, and left mood with no effect
+# whatsoever at novelty=1 where relevance is zero-weighted. Adding it here can
+# push final_score slightly outside [0,1]; that is fine, since the value is
+# only ever compared against other candidates' by the sort and by MMR.
+# Exactly a no-op when no mood was requested: mood_score is 0.0 for every
+# candidate and x + 0.0 == x.
+def _with_mood(final_score: float, candidate) -> float:
+    mood_score = get_field(candidate, "mood_score", 0.0) or 0.0
+    return final_score + MOOD_SCORE_WEIGHT * mood_score
+
+
 # Compute raw relevance and obscurity before normalizing so both can be
 # min-max scaled to [0,1]. Without this relevance clusters near the top of
 # its range while obscurity spans the full range, biasing novelty=0.5 toward relevance.
@@ -149,6 +163,7 @@ def _as_scored_candidate(
         user_count=get_field(c, "user_count"),
         artist_listen_count=get_field(c, "artist_listen_count"),
         tags=get_field(c, "tags"),
+        mood_score=get_field(c, "mood_score", 0.0) or 0.0,
         final_score=final_score,
         relevance_score=relevance_norm,
         novelty_score=novelty_score,
@@ -193,6 +208,7 @@ def score_and_sort(candidates: list, novelty: float) -> list:
         final_score = (
             1 - novelty
         ) * relevance_norm + novelty * popularity_obscurity
+        final_score = _with_mood(final_score, c)
         result.append(_as_scored_candidate(c, final_score, relevance_norm, obs))
 
     result.sort(key=lambda x: x.final_score, reverse=True)

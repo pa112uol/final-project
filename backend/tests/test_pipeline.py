@@ -275,9 +275,12 @@ class TestRunPipeline:
         assert all(t.first_release_date is None for t in tracks)
         assert all(t.releases == [] for t in tracks)
 
-    async def test_applies_mood_boost_happy_candidates_outrank_equal_non_happy(
+    async def test_mood_ranks_matching_candidate_above_relevance_equal_peer(
         self,
     ):
+        # Both candidates share an artist (equal tag_weight_sum) and carry one
+        # seed tag plus one non-seed tag, so their relevance is identical and
+        # the mood tag is the only thing separating them.
         class MoodClients(make_clients().__class__):
             async def fetch_top_recordings_for_artist(
                 self, mbid, name, limit, api_key
@@ -290,7 +293,7 @@ class TestRunPipeline:
                         "duration_ms": None,
                         "listen_count": 100,
                         "user_count": 50,
-                        "tags": ["happy"],
+                        "tags": ["shoegaze", "happy"],
                     },
                     {
                         "mbid": "rec-neutral",
@@ -299,27 +302,22 @@ class TestRunPipeline:
                         "duration_ms": None,
                         "listen_count": 100,
                         "user_count": 50,
-                        "tags": ["shoegaze"],
+                        "tags": ["shoegaze", "noise pop"],
                     },
                 ]
 
         tracks = await run_pipeline(
             [TEST_SEED], "fake-api-key", "happy", 0, MoodClients()
         )
-        happy_idx = next(
-            (i for i, t in enumerate(tracks) if t.mbid == "rec-happy"), -1
-        )
-        neutral_idx = next(
-            (i for i, t in enumerate(tracks) if t.mbid == "rec-neutral"), -1
-        )
-        if happy_idx != -1 and neutral_idx != -1:
-            assert happy_idx < neutral_idx
+        order = [t.mbid for t in tracks]
+        assert order.index("rec-happy") < order.index("rec-neutral")
 
-    async def test_mood_boost_fires_via_lf_tags_when_lb_recording_tags_contain_no_mood_words(
+    async def test_mood_fires_on_lf_enrichment_tags_not_just_lb_recording_tags(
         self,
     ):
-        # This is the scenario where LB tags are pure genre labels; mood words come
-        # only from LF enrichment.
+        # LB recording tags are pure genre labels here; the mood word arrives
+        # only via Last.fm enrichment. Both candidates gain exactly one tag so
+        # the cosine length penalty applies equally and relevance stays tied.
         class MoodEnrichClients(make_clients().__class__):
             async def fetch_top_recordings_for_artist(
                 self, mbid, name, limit, api_key
@@ -349,21 +347,24 @@ class TestRunPipeline:
                 self, title, artist, api_key, mbid=None
             ):
                 if title == "Chill Track":
-                    return [{"name": "chill", "count": 80}]
-                return []
+                    return [{"name": "chillout", "count": 80}]
+                return [{"name": "noise pop", "count": 80}]
 
         tracks = await run_pipeline(
             [TEST_SEED], "fake-api-key", "chill", 0, MoodEnrichClients()
         )
-        chill_idx = next(
-            (i for i, t in enumerate(tracks) if t.mbid == "rec-chill"), -1
+        order = [t.mbid for t in tracks]
+        assert order.index("rec-chill") < order.index("rec-other")
+
+    async def test_unknown_mood_leaves_results_identical_to_no_mood(self):
+        clients = make_clients()
+        baseline = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, clients
         )
-        other_idx = next(
-            (i for i, t in enumerate(tracks) if t.mbid == "rec-other"), -1
+        unknown = await run_pipeline(
+            [TEST_SEED], "fake-api-key", "not-a-mood", 0, clients
         )
-        assert chill_idx >= 0
-        assert other_idx >= 0
-        assert chill_idx < other_idx
+        assert [t.mbid for t in unknown] == [t.mbid for t in baseline]
 
     async def test_respects_novelty_one_by_using_artist_popularity_client(self):
         calls = []
