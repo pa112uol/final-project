@@ -7,24 +7,51 @@ from .http import get_client
 # See https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
 MB_BASE = "https://musicbrainz.org/ws/2"
 MB_MIN_INTERVAL_S = 1.05
+MB_RETRYABLE_STATUS_CODES = (429, 503)
+MB_RETRY_BACKOFF_S = 0.5
+MB_MAX_ATTEMPTS = 2
 
 logger = logging.getLogger(__name__)
 
 # asyncio.Lock + a serial queue ensures MB requests are fully serialized.
 # Each request waits for the previous fetch + cooldown to finish before firing.
-_mb_lock = asyncio.Lock()
+# The lock is recreated whenever the running loop changes (mirroring
+# clients.http.get_client) since Django's per-request asyncio.run() gives
+# each request its own loop, and a Lock stays bound to whichever loop first
+# contended on it -- reusing it across loops raises RuntimeError.
+_mb_lock: asyncio.Lock | None = None
+_mb_lock_loop = None
 _last_request_time = 0.0
 
 
-async def mb_fetch(url: str):
+def _get_mb_lock() -> asyncio.Lock:
+    global _mb_lock, _mb_lock_loop
+    loop = asyncio.get_running_loop()
+    if _mb_lock is None or _mb_lock_loop is not loop:
+        _mb_lock = asyncio.Lock()
+        _mb_lock_loop = loop
+    return _mb_lock
+
+
+# Rate-limited GET against MB, retrying once on 429/503 with a short backoff
+# on top of the routine inter-request spacing above.
+async def mb_fetch(url: str, params: dict | None = None):
     global _last_request_time
-    async with _mb_lock:
-        now = asyncio.get_running_loop().time()
-        elapsed = now - _last_request_time
-        if elapsed < MB_MIN_INTERVAL_S:
-            await asyncio.sleep(MB_MIN_INTERVAL_S - elapsed)
-        res = await get_client("musicbrainz", timeout=10).get(url)
-        _last_request_time = asyncio.get_running_loop().time()
+    for attempt in range(MB_MAX_ATTEMPTS):
+        async with _get_mb_lock():
+            now = asyncio.get_running_loop().time()
+            elapsed = now - _last_request_time
+            if elapsed < MB_MIN_INTERVAL_S:
+                await asyncio.sleep(MB_MIN_INTERVAL_S - elapsed)
+            res = await get_client(
+                "musicbrainz", timeout=10, follow_redirects=True
+            ).get(url, params=params)
+            _last_request_time = asyncio.get_running_loop().time()
+
+        is_last_attempt = attempt == MB_MAX_ATTEMPTS - 1
+        if res.status_code in MB_RETRYABLE_STATUS_CODES and not is_last_attempt:
+            await asyncio.sleep(MB_RETRY_BACKOFF_S)
+            continue
         return res
 
 
@@ -32,7 +59,9 @@ async def resolve_artist_mbid(name: str) -> str:
     clean_name = name.replace('"', "")
     query = f'artist:"{clean_name}"'
     try:
-        res = await mb_fetch(f"{MB_BASE}/artist?query={query}&limit=1&fmt=json")
+        res = await mb_fetch(
+            f"{MB_BASE}/artist", params={"query": query, "limit": 1, "fmt": "json"}
+        )
         if not res.is_success:
             return ""
         data = res.json()
@@ -200,9 +229,7 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
     logger.debug("MB search query: %s", lucene_query)
 
     try:
-        res = await get_client(
-            "mb-search", timeout=10, follow_redirects=True
-        ).get(
+        res = await mb_fetch(
             f"{MB_BASE}/recording",
             params={"query": lucene_query, "fmt": "json", "limit": 100},
         )

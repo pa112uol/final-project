@@ -1,28 +1,21 @@
-import asyncio
 from .http import get_client
+from .musicbrainz import mb_fetch
 
 MB_BASE = "https://musicbrainz.org/ws/2"
 CAA_BASE = "https://coverartarchive.org"
 
 
 async def _release_mbids_for_recording(recording_mbid: str) -> list[str]:
-    for attempt in range(2):
-        try:
-            res = await get_client("coverart-mb", timeout=8).get(
-                f"{MB_BASE}/recording/{recording_mbid}",
-                params={"inc": "releases", "fmt": "json"},
-            )
-            if res.status_code in (429, 503):
-                if attempt == 0:
-                    await asyncio.sleep(0.5)
-                    continue
-                return []
-            if not res.is_success:
-                return []
-            return [r["id"] for r in res.json().get("releases") or []]
-        except Exception:
+    try:
+        res = await mb_fetch(
+            f"{MB_BASE}/recording/{recording_mbid}",
+            params={"inc": "releases", "fmt": "json"},
+        )
+        if not res.is_success:
             return []
-    return []
+        return [r["id"] for r in res.json().get("releases") or []]
+    except Exception:
+        return []
 
 
 async def _front_art_url(release_mbid: str) -> str | None:
@@ -36,7 +29,10 @@ async def _front_art_url(release_mbid: str) -> str | None:
         for image in res.json().get("images", []):
             if image.get("front"):
                 t = image.get("thumbnails", {})
-                return t.get("small") or t.get("250") or t.get("large") or image.get("image")
+                url = t.get("small") or t.get("250") or t.get("large") or image.get("image")
+                # Cover Art Archive returns http:// URLs even when queried over
+                # https; upgrade so images aren't blocked as mixed content
+                return url.replace("http://", "https://", 1) if url else None
         return None
     except Exception:
         return None

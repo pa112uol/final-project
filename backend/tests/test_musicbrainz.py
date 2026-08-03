@@ -5,11 +5,20 @@ from clients.musicbrainz import (
     _escape_mb,
     _parse_artist_track,
     _build_field_query,
+    mb_fetch,
     search_tracks,
     resolve_canonical_mbid,
     resolve_canonical_recording,
     resolve_artist_mbid,
 )
+
+
+# mb_fetch rate-limits between requests and backs off on 429/503; mocking
+# sleep keeps every test in this file from paying that delay for real.
+@pytest.fixture(autouse=True)
+def no_sleep():
+    with patch("clients.musicbrainz.asyncio.sleep", new=AsyncMock()):
+        yield
 
 
 def _make_recording(
@@ -232,6 +241,58 @@ class TestBuildFieldQuery:
     def test_output_is_non_empty_string(self):
         q = _build_field_query(None, "any query")
         assert isinstance(q, str) and len(q) > 0
+
+
+class TestMbFetch:
+    async def test_returns_response_on_success(self):
+        resp = _make_response(status_code=200)
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=resp)
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            result = await mb_fetch("https://example.com/recording")
+        assert result is resp
+        assert mock_client.get.call_count == 1
+
+    async def test_passes_params_through(self):
+        resp = _make_response(status_code=200)
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=resp)
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            await mb_fetch("https://example.com", params={"query": "x"})
+        assert mock_client.get.call_args.kwargs["params"] == {"query": "x"}
+
+    async def test_retries_once_on_rate_limit_then_succeeds(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(
+            side_effect=[
+                _make_response(success=False, status_code=429),
+                _make_response(status_code=200),
+            ]
+        )
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            result = await mb_fetch("https://example.com")
+        assert result.status_code == 200
+        assert mock_client.get.call_count == 2
+
+    async def test_gives_up_after_max_attempts(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(
+            return_value=_make_response(success=False, status_code=503)
+        )
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            result = await mb_fetch("https://example.com")
+        assert result.status_code == 503
+        assert mock_client.get.call_count == 2
+
+    async def test_non_retryable_error_returns_immediately(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(
+            return_value=_make_response(success=False, status_code=404)
+        )
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            result = await mb_fetch("https://example.com")
+        assert result.status_code == 404
+        assert mock_client.get.call_count == 1
 
 
 class TestSearchTracks:
@@ -685,10 +746,8 @@ class TestResolveArtistMbid:
         mock_fetch = make_mb_resp([{"id": "abc-123", "score": 90}])
         with patch("clients.musicbrainz.mb_fetch", new=mock_fetch):
             await resolve_artist_mbid('AC"DC')
-        url = mock_fetch.call_args[0][0]
-        assert '"' not in url.split("query=")[1].split("&")[0].replace(
-            'artist:"', ""
-        ).replace('"', "")
+        query = mock_fetch.call_args.kwargs["params"]["query"]
+        assert '"' not in query.replace('artist:"', "").replace('"', "")
 
     async def test_uses_first_artist_in_response(self):
         artists = [

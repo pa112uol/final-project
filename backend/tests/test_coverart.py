@@ -87,8 +87,8 @@ class TestReleaseMbidsForRecording:
             ]
         )
         with (
-            patch("clients.coverart.get_client", return_value=mock_client),
-            patch("clients.coverart.asyncio.sleep", new=AsyncMock()),
+            patch("clients.musicbrainz.get_client", return_value=mock_client),
+            patch("clients.musicbrainz.asyncio.sleep", new=AsyncMock()),
         ):
             result = await _release_mbids_for_recording("some-mbid")
         assert result == ["release-1"]
@@ -100,8 +100,8 @@ class TestReleaseMbidsForRecording:
             side_effect=[_mb_response(503), _mb_response(503)]
         )
         with (
-            patch("clients.coverart.get_client", return_value=mock_client),
-            patch("clients.coverart.asyncio.sleep", new=AsyncMock()),
+            patch("clients.musicbrainz.get_client", return_value=mock_client),
+            patch("clients.musicbrainz.asyncio.sleep", new=AsyncMock()),
         ):
             result = await _release_mbids_for_recording("some-mbid")
         assert result == []
