@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import TracksList from "./TracksList";
-import NoveltySlider from "./NoveltySlider";
-import MoodPicker from "./MoodPicker";
+import TweakSidebar from "./TweakSidebar";
+import PageHeader from "./PageHeader";
+import { SIDEBAR_PAD } from "../lib/styles";
 
 export default function TracksListWrapper() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -54,21 +55,23 @@ export default function TracksListWrapper() {
   const apiUrl = `/api/recommendations/?${apiParams.toString()}`;
 
   return (
-    <div className="space-y-6">
-      <div className="bg-bg-surface rounded-xl p-4 space-y-4">
-        <div>
-          <p className="text-sm text-text-secondary mb-2">Mood</p>
-          <MoodPicker value={mood} onChange={setMood} />
+    <div className={SIDEBAR_PAD}>
+      <TweakSidebar
+        mood={mood}
+        onMoodChange={setMood}
+        novelty={noveltyDisplay}
+        onNoveltyChange={setNoveltyDisplay}
+        onNoveltyCommit={commitNovelty}
+      />
+
+      <main className="px-5 py-6 lg:px-10 lg:py-8">
+        <div className="max-w-[760px] mx-auto">
+          <PageHeader title="Similar tracks" />
+
+          <TracksList key={apiUrl} url={apiUrl} />
         </div>
-
-        <NoveltySlider
-          value={noveltyDisplay}
-          onChange={setNoveltyDisplay}
-          onCommit={commitNovelty}
-        />
-      </div>
-
-      <TracksList key={apiUrl} url={apiUrl} />
+      </main>
     </div>
   );
 }
+

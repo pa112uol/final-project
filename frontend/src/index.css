@@ -1,27 +1,107 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg-base: #0c0c0e;
-  --color-bg-surface: #161618;
-  --color-bg-raised: #1e1e22;
+  /* Opaque surface stack, warm near-black. */
+  --color-bg-base: #131110;
+  --color-bg-header: #17140f;
+  --color-bg-surface: #1b1815;
+  --color-bg-raised: #221f1b;
 
-  --color-border-subtle: #1a1a1e;
-  --color-border-default: #222226;
+  /* Translucent fills — these sit on whatever surface is behind them, so a
+     chip reads the same inside a card as it does in the sidebar. */
+  --color-fill-subtle: rgba(255, 255, 255, 0.04);
+  --color-fill: rgba(255, 255, 255, 0.08);
+  --color-fill-strong: rgba(255, 255, 255, 0.12);
+
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border-default: rgba(255, 255, 255, 0.12);
 
   --color-text-primary: #f2eee6;
-  --color-text-secondary: #a8a49c;
-  --color-text-muted: #68686e;
+  --color-text-secondary: #d8d5cf;
+  --color-text-muted: #8a8783;
+  --color-text-dim: #68655f;
 
-  --font-outfit: 'Outfit', sans-serif;
+  --font-outfit: "Outfit", sans-serif;
 
-  --color-amber: #ffcc44;
-  --color-amber-dark: #e0a830;
+  --color-amber: #f2b840;
+  --color-amber-dark: #d9a230;
+  /* Desaturated amber pair for tags, which need to sit quietly next to the
+     accent rather than compete with it. */
+  --color-amber-muted: #c9a44b;
+  --color-amber-soft: rgba(242, 184, 64, 0.12);
 
   --color-blue: #66bbff;
   --color-blue-dark: #4499dd;
 
   --color-green: #66dd99;
   --color-red: #ff8888;
+
+  --radius-chip: 7px;
+  --radius-media: 10px;
+  --radius-card: 14px;
+
+  --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+/* Novelty slider. Stays a native <input type="range"> so keyboard and
+   assistive-tech behaviour comes for free; only the paint is custom. React
+   sets --pct inline, which fills the WebKit track (Firefox has
+   ::-moz-range-progress and needs no help). */
+.range-amber {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.range-amber::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--color-amber) var(--pct, 0%),
+    var(--color-fill-strong) var(--pct, 0%)
+  );
+}
+
+.range-amber::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-fill-strong);
+}
+
+.range-amber::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-amber);
+}
+
+/* The thumb's dark halo is what separates it from the filled track. */
+.range-amber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  margin-top: -6px; /* centres the 16px thumb on the 4px track */
+  border: none;
+  border-radius: 50%;
+  background: var(--color-amber);
+  box-shadow:
+    0 0 0 4px rgba(0, 0, 0, 0.35),
+    0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+.range-amber::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: var(--color-amber);
+  box-shadow:
+    0 0 0 4px rgba(0, 0, 0, 0.35),
+    0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 @media (prefers-reduced-motion: reduce) {

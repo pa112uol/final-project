@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { FOCUS_RING } from "../lib/styles";
 
 interface NoveltySliderProps {
@@ -6,16 +7,20 @@ interface NoveltySliderProps {
   onCommit?: (value: number) => void;
 }
 
-export default function NoveltySlider({ value, onChange, onCommit }: NoveltySliderProps) {
-  const pct = Math.round(value * 100);
+// The slider stores 0–1 but reads out as 0–100 everywhere it is shown.
+export function noveltyPct(value: number): number {
+  return Math.round(value * 100);
+}
+
+export default function NoveltySlider({
+  value,
+  onChange,
+  onCommit,
+}: NoveltySliderProps) {
+  const pct = noveltyPct(value);
 
   return (
     <div>
-      <p className="text-sm text-text-secondary mb-1">
-        Novelty:{" "}
-        <span className="font-semibold text-text-primary">{pct}</span>
-        <span className="text-text-muted"> / 100</span>
-      </p>
       <input
         type="range"
         min={0}
@@ -23,16 +28,25 @@ export default function NoveltySlider({ value, onChange, onCommit }: NoveltySlid
         step={0.01}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        onMouseUp={onCommit ? (e) => onCommit(Number((e.target as HTMLInputElement).value)) : undefined}
-        onTouchEnd={onCommit ? (e) => onCommit(Number((e.target as HTMLInputElement).value)) : undefined}
+        onMouseUp={
+          onCommit
+            ? (e) => onCommit(Number((e.target as HTMLInputElement).value))
+            : undefined
+        }
+        onTouchEnd={
+          onCommit
+            ? (e) => onCommit(Number((e.target as HTMLInputElement).value))
+            : undefined
+        }
         aria-label={`Novelty: ${pct} out of 100`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
-        className={`w-full accent-blue rounded ${FOCUS_RING}`}
+        style={{ "--pct": `${pct}%` } as CSSProperties}
+        className={`range-amber rounded ${FOCUS_RING}`}
       />
       <div
-        className="flex justify-between text-xs text-text-muted mt-1"
+        className="flex justify-between text-xs text-text-dim mt-2"
         aria-hidden="true"
       >
         <span>Popular</span>
@@ -41,3 +55,4 @@ export default function NoveltySlider({ value, onChange, onCommit }: NoveltySlid
     </div>
   );
 }
+

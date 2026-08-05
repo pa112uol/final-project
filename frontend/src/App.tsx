@@ -7,12 +7,9 @@ import Logo from "./components/Logo";
 import CompositionSearch from "./components/CompositionSearch";
 import TracksListWrapper from "./components/TracksListWrapper";
 import TracksList from "./components/TracksList";
-
-interface Seed {
-  mbid: string;
-  title: string;
-  artist: string;
-}
+import PageHeader from "./components/PageHeader";
+import { TOPBAR_PAD } from "./lib/styles";
+import type { Seed } from "./lib/types";
 
 function SearchPage() {
   const navigate = useNavigate();
@@ -48,11 +45,9 @@ function SearchPage() {
 
 function ResultsPage() {
   return (
-    <div className="min-h-screen bg-bg-base text-text-primary">
+    <div className={`min-h-screen bg-bg-base text-text-primary ${TOPBAR_PAD}`}>
       <Navbar />
-      <main className="max-w-3xl mx-auto px-4 py-12">
-        <TracksListWrapper />
-      </main>
+      <TracksListWrapper />
     </div>
   );
 }
@@ -60,9 +55,10 @@ function ResultsPage() {
 function RandomPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   return (
-    <div className="min-h-screen bg-bg-base text-text-primary">
+    <div className={`min-h-screen bg-bg-base text-text-primary ${TOPBAR_PAD}`}>
       <Navbar />
-      <main className="max-w-3xl mx-auto px-4 py-12">
+      <main className="max-w-[760px] mx-auto px-5 py-6 lg:px-10 lg:py-8">
+        <PageHeader title="Random picks" />
         <button
           onClick={() => setRefreshKey((k) => k + 1)}
           className="w-full bg-amber hover:bg-amber-dark text-bg-base font-semibold rounded-lg px-4 py-3 transition-colors mb-8"

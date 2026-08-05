@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { ArrowRight, Shuffle } from "lucide-react";
 import CoverArt from "./CoverArt";
-import NoveltySlider from "./NoveltySlider";
+import NoveltySlider, { noveltyPct } from "./NoveltySlider";
 import MoodPicker from "./MoodPicker";
-import { FOCUS_RING } from "../lib/styles";
+import Field from "./Field";
+import { FOCUS_RING, FOCUS_RING_INSET } from "../lib/styles";
+import type { Seed } from "../lib/types";
 
 interface SearchResult {
   type: "track";
@@ -13,12 +15,6 @@ interface SearchResult {
   album?: string | null;
   releaseType?: string | null;
   year?: string | null;
-}
-
-interface Seed {
-  mbid: string;
-  title: string;
-  artist: string;
 }
 
 interface CompositionSearchProps {
@@ -163,10 +159,7 @@ export default function CompositionSearch({
 
   return (
     <div className="space-y-6">
-      <div>
-        <label className="block text-xs uppercase tracking-widest text-text-muted mb-1.5">
-          Pick a track
-        </label>
+      <Field label="Pick a track">
         <div className="relative" ref={containerRef}>
         <div className="relative">
           <input
@@ -197,7 +190,7 @@ export default function CompositionSearch({
           {loading && (
             <span className="absolute right-3 top-1/2 -translate-y-1/2">
               <svg
-                className="animate-spin h-4 w-4 text-blue"
+                className="animate-spin h-4 w-4 text-amber"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
@@ -259,7 +252,7 @@ export default function CompositionSearch({
                         addChip(r);
                       }}
                       onMouseEnter={() => setActiveIndex(i)}
-                      className={`w-full text-left px-4 py-2.5 transition-colors flex items-center justify-between gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue ${
+                      className={`w-full text-left px-4 py-2.5 transition-colors flex items-center justify-between gap-2 ${FOCUS_RING_INSET} ${
                         isActive ? "bg-bg-raised" : "hover:bg-bg-raised"
                       }`}
                     >
@@ -312,16 +305,15 @@ export default function CompositionSearch({
           ))}
         </div>
       )}
-      </div>
+      </Field>
 
-      <div>
-        <label className="block text-xs uppercase tracking-widest text-text-muted mb-1.5">
-          Mood
-        </label>
+      <Field label="Mood">
         <MoodPicker value={mood} onChange={setMood} />
-      </div>
+      </Field>
 
-      <NoveltySlider value={novelty} onChange={setNovelty} />
+      <Field label="Novelty" hint={`${noveltyPct(novelty)} / 100`}>
+        <NoveltySlider value={novelty} onChange={setNovelty} />
+      </Field>
 
       <button
         onClick={discover}

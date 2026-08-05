@@ -58,11 +58,11 @@ export default function CoverArt({
   return (
     <div className={`${className} relative flex-shrink-0 overflow-hidden`}>
       {showSkeleton && (
-        <div className="absolute inset-0 bg-border-default animate-pulse" />
+        <div className="absolute inset-0 bg-bg-raised animate-pulse" />
       )}
 
       {showPlaceholder && (
-        <div className="absolute inset-0 bg-border-default flex items-center justify-center">
+        <div className="absolute inset-0 bg-bg-raised flex items-center justify-center">
           <svg
             className="w-1/2 h-1/2 text-text-muted"
             fill="none"
