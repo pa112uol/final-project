@@ -22,6 +22,16 @@ from .constants import (
     RECOMMENDATION_LIMIT,
     TOP_TAGS_COUNT,
     MAX_TRACKS_PER_ARTIST,
+    ENRICH_TOP_ARTISTS,
+    ENRICH_TRACKS_PER_ARTIST,
+    ENRICH_MODES,
+    ENRICH_MODE_ALL,
+    ENRICH_MODE_AUTO,
+    ENRICH_MODE_FINAL,
+    ENRICH_MODE_HYBRID,
+    DEFAULT_ENRICH_MODE,
+    POST_SELECTION_ENRICH_MODES,
+    HIGH_NOVELTY_ENRICH_THRESHOLD,
 )
 from .utils import get_field, set_field
 
@@ -233,6 +243,58 @@ def filter_and_deduplicate_candidates(
     return candidates
 
 
+# Picks the enrichment mode for a request. RECS_ENRICH_MODE always wins so a
+# run can be pinned for testing, otherwise auto reads novelty, and an unknown
+# novelty (None) falls back to the richer mode
+def enrich_mode(novelty: float | None = None) -> str:
+    configured = os.environ.get("RECS_ENRICH_MODE", DEFAULT_ENRICH_MODE)
+    mode = configured.strip().lower()
+    if mode not in ENRICH_MODES:
+        mode = DEFAULT_ENRICH_MODE
+    if mode != ENRICH_MODE_AUTO:
+        return mode
+    if novelty is not None and novelty >= HIGH_NOVELTY_ENRICH_THRESHOLD:
+        return ENRICH_MODE_FINAL
+    return ENRICH_MODE_HYBRID
+
+
+# Returns the candidates to enrich before selection: every candidate in "all"
+# mode, none in "final" mode, and for the capped modes the most listened tracks
+# of the highest scoring artists
+def select_enrichment_targets(
+    candidates: list, novelty: float | None = None
+) -> list:
+    mode = enrich_mode(novelty)
+    if mode == ENRICH_MODE_ALL:
+        return list(candidates)
+    if mode == ENRICH_MODE_FINAL:
+        return []
+
+    by_artist: dict[str, list] = {}
+    for candidate in candidates:
+        by_artist.setdefault(get_field(candidate, "artist").lower(), []).append(
+            candidate
+        )
+
+    # Every track of an artist carries the same tag_weight_sum, so the first
+    # one is enough to rank the artist
+    ranked_artists = sorted(
+        by_artist.items(),
+        key=lambda item: (-get_field(item[1][0], "tag_weight_sum"), item[0]),
+    )[:ENRICH_TOP_ARTISTS]
+
+    targets = []
+    for _, artist_candidates in ranked_artists:
+        artist_candidates.sort(
+            key=lambda c: (
+                -get_field(c, "listen_count"),
+                get_field(c, "title").lower(),
+            )
+        )
+        targets.extend(artist_candidates[:ENRICH_TRACKS_PER_ARTIST])
+    return targets
+
+
 async def enrich_candidate_with_lf_tags(
     candidate, clients, api_key, normalized_tag_weights
 ):
@@ -245,6 +307,9 @@ async def enrich_candidate_with_lf_tags(
         )
     except Exception:
         return False
+    # The call is spent even when no usable tags come back, so mark the
+    # candidate before the early returns and stop a later pass paying twice
+    set_field(candidate, "lf_enriched", True)
     if not lf_tags:
         return False
 
@@ -272,21 +337,61 @@ async def enrich_candidate_with_lf_tags(
 # since LB recording tags do carry mood words like "mellow". Tags are merged
 # rather than replaced so LB genre labels survive for MMR
 async def enrich_candidates_with_lf_tags(
-    candidates, clients, api_key, normalized_tag_weights
-):
+    candidates: list,
+    clients,
+    api_key: str,
+    normalized_tag_weights: dict,
+    novelty: float | None = None,
+) -> None:
+    targets = select_enrichment_targets(candidates, novelty)
     results = await asyncio.gather(
         *[
             enrich_candidate_with_lf_tags(
                 c, clients, api_key, normalized_tag_weights
             )
-            for c in candidates
+            for c in targets
         ]
     )
     enriched_count = sum(1 for enriched in results if enriched)
     logger.info(
-        "[pipeline:enrich] LF enrichment added tags to %d/%d candidates",
+        "[pipeline:enrich] LF enrichment added tags to %d/%d candidates"
+        " (%d of %d fetched)",
         enriched_count,
         len(candidates),
+        len(targets),
+        len(candidates),
+    )
+
+
+# Tops up the selected tracks with per-track tags. Only modes that skipped or
+# capped the pre-selection pass have anything left to fetch, and already
+# enriched tracks are skipped, so this costs at most one call per result
+async def enrich_selected_tracks(
+    selected: list,
+    clients,
+    api_key: str,
+    normalized_tag_weights: dict,
+    novelty: float | None = None,
+) -> None:
+    mode = enrich_mode(novelty)
+    if mode not in POST_SELECTION_ENRICH_MODES:
+        return
+    pending = [c for c in selected if not get_field(c, "lf_enriched", False)]
+    if not pending:
+        return
+    await asyncio.gather(
+        *[
+            enrich_candidate_with_lf_tags(
+                c, clients, api_key, normalized_tag_weights
+            )
+            for c in pending
+        ]
+    )
+    logger.info(
+        "[pipeline:enrich] topped up %d/%d selected tracks (mode=%s)",
+        len(pending),
+        len(selected),
+        mode,
     )
 
 
@@ -453,7 +558,7 @@ async def run_pipeline(
     # candidates against the requested mood. Mood runs after enrichment because
     # mood words usually arrive with the Last.fm track tags, not the LB ones
     await enrich_candidates_with_lf_tags(
-        candidates, clients, api_key, normalized_tag_weights
+        candidates, clients, api_key, normalized_tag_weights, novelty
     )
     await apply_artist_popularity_fallback(candidates, clients)
     apply_mood_scores(candidates, mood)
@@ -477,6 +582,12 @@ async def run_pipeline(
         len(pre_mmr),
     )
     top = select_final_tracks(pre_mmr, seed_tag_sets, RECOMMENDATION_LIMIT)
+    # Modes that skip or cap the pre-selection pass would otherwise return
+    # tracks with only the sparse tags the source supplied, so top up the
+    # winners before returning
+    await enrich_selected_tracks(
+        top, clients, api_key, normalized_tag_weights, novelty
+    )
     _log_final_candidates(top)
 
     return list(

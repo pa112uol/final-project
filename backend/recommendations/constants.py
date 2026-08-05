@@ -38,6 +38,51 @@ REC_VS_ARTIST_BLEND = 0.7
 # Artist-level tag relevance vs track-level tag relevance
 ARTIST_VS_TRACK_TAG_BLEND = 0.6
 
+# Enrichment costs one HTTP call per candidate (~91 at novelty 0, ~182 at
+# novelty 1, to return 10 tracks), so these cap how much gets enriched.
+# The cap is on artists, not tracks: with RECORDING_SOURCE=lastfm the recordings
+# arrive untagged, so before enrichment an artist's tracks differ only in listen
+# count and ranking tracks just ranks artists. Instead pick the top artists (an
+# artist-level choice from artist-level signal), then keep the most listened
+# tracks of each.
+ENRICH_TOP_ARTISTS = 15
+# Above MAX_TRACKS_PER_ARTIST so the artist cap still has a choice to make
+ENRICH_TRACKS_PER_ARTIST = 3
+
+# Enrichment does two jobs that can be paid for separately: tags for selection,
+# and tags on the tracks actually returned. Cutting the pre-selection pass cuts
+# both, so results come back with about a third of the tags - measured 9.1 -> 2.9
+# tags per returned track. The modes split the two jobs apart:
+# all - enrich every candidate before selection (most calls, richest output)
+# budget - enrich a capped subset before selection (fewer calls, thin output)
+# final - enrich only the selected tracks (fewest calls, rich output, but
+#   selection uses whatever tags the sources already provided)
+# hybrid - capped subset before selection, then top up the winners
+# auto - pick per request from novelty
+ENRICH_MODE_ALL = "all"
+ENRICH_MODE_BUDGET = "budget"
+ENRICH_MODE_FINAL = "final"
+ENRICH_MODE_HYBRID = "hybrid"
+ENRICH_MODE_AUTO = "auto"
+ENRICH_MODES = (
+    ENRICH_MODE_ALL,
+    ENRICH_MODE_BUDGET,
+    ENRICH_MODE_FINAL,
+    ENRICH_MODE_HYBRID,
+    ENRICH_MODE_AUTO,
+)
+DEFAULT_ENRICH_MODE = ENRICH_MODE_AUTO
+
+# Modes that leave enrichment for the selected tracks to pick up afterwards
+POST_SELECTION_ENRICH_MODES = (ENRICH_MODE_FINAL, ENRICH_MODE_HYBRID)
+
+# Above this novelty, auto mode switches from hybrid to final. High novelty
+# fetches a deeper, more obscure pool, and Last.fm has few tags for obscure
+# recordings. Measured over 6 queries, enriching every candidate cost 178 calls
+# and still gave only 2.3 tags per returned track, the same as every cheaper
+# mode
+HIGH_NOVELTY_ENRICH_THRESHOLD = 0.75
+
 # How many of a seed's strongest tags define what is "distinctive" about it.
 # Differencing the full tag lists would push distinctiveness into a long tail
 # of rare tags no candidate carries whereas the top tags characterise a seed.

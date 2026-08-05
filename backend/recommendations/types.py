@@ -107,6 +107,9 @@ class Candidate:
     # How strongly the track expresses the requested mood, in [-1, 1]. Stays
     # 0.0 when no mood was requested, which zeroes the mood term in scoring
     mood_score: float = 0.0
+    # Set once Last.fm track tags have been fetched, so the post-selection
+    # top-up can skip anything the pre-selection pass already covered
+    lf_enriched: bool = False
 
 
 @dataclass

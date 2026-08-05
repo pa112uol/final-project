@@ -1,6 +1,17 @@
 import pytest
-from recommendations.pipeline import run_pipeline
-from recommendations.types import Seed, StreamingLinks
+from recommendations.pipeline import (
+    run_pipeline,
+    select_enrichment_targets,
+    enrich_selected_tracks,
+    enrich_mode,
+)
+from recommendations.constants import (
+    ENRICH_TOP_ARTISTS,
+    ENRICH_TRACKS_PER_ARTIST,
+    MAX_TRACKS_PER_ARTIST,
+    HIGH_NOVELTY_ENRICH_THRESHOLD,
+)
+from recommendations.types import Seed, StreamingLinks, Candidate
 
 
 def make_streaming():
@@ -491,3 +502,150 @@ class TestRunPipeline:
         )
         # Pool too small to filter all 3 tracks survive
         assert len(tracks) == 3
+
+
+def make_candidate(artist, title, tag_weight_sum=100, listen_count=0):
+    return Candidate(
+        title=title, artist=artist, artist_mbid=f"am-{artist}",
+        mbid=f"m-{artist}-{title}", duration_ms=None,
+        tag_weight_sum=tag_weight_sum, track_tag_score=0,
+        listen_count=listen_count, user_count=0, artist_listen_count=0,
+        tags=[],
+    )
+
+
+@pytest.fixture
+def budget_on(monkeypatch):
+    monkeypatch.setenv("RECS_ENRICH_MODE", "budget")
+
+
+@pytest.fixture
+def budget_off(monkeypatch):
+    monkeypatch.setenv("RECS_ENRICH_MODE", "all")
+
+
+class TestSelectEnrichmentTargets:
+    def test_returns_every_candidate_in_all_mode(self, budget_off):
+        candidates = [make_candidate("A", f"t{i}") for i in range(50)]
+        assert len(select_enrichment_targets(candidates)) == 50
+
+    def test_keeps_only_the_most_listened_tracks_per_artist(self, budget_on):
+        candidates = [
+            make_candidate("A", f"t{i}", listen_count=i) for i in range(6)
+        ]
+        titles = [c.title for c in select_enrichment_targets(candidates)]
+        assert len(titles) == ENRICH_TRACKS_PER_ARTIST
+        # Highest listen counts are t5, t4, t3
+        assert titles == ["t5", "t4", "t3"]
+
+    def test_limits_how_many_artists_are_enriched(self, budget_on):
+        candidates = [
+            make_candidate(f"A{i}", "t", tag_weight_sum=100 - i)
+            for i in range(ENRICH_TOP_ARTISTS + 10)
+        ]
+        targets = select_enrichment_targets(candidates)
+        assert len({c.artist for c in targets}) == ENRICH_TOP_ARTISTS
+
+    def test_prefers_artists_with_the_highest_tag_weight_sum(self, budget_on):
+        candidates = [make_candidate("Weak", "t", tag_weight_sum=1)] + [
+            make_candidate(f"Strong{i}", "t", tag_weight_sum=100)
+            for i in range(ENRICH_TOP_ARTISTS)
+        ]
+        artists = {c.artist for c in select_enrichment_targets(candidates)}
+        assert "Weak" not in artists
+
+    def test_enriches_more_tracks_than_the_artist_cap_can_use(self):
+        # The cap picks MAX_TRACKS_PER_ARTIST per artist, so enriching exactly
+        # that many would leave the cap no informed choice
+        assert ENRICH_TRACKS_PER_ARTIST > MAX_TRACKS_PER_ARTIST
+
+    def test_returns_empty_for_no_candidates(self, budget_on):
+        assert select_enrichment_targets([]) == []
+
+    def test_final_mode_defers_all_pre_selection_enrichment(self, monkeypatch):
+        monkeypatch.setenv("RECS_ENRICH_MODE", "final")
+        candidates = [make_candidate("A", f"t{i}") for i in range(20)]
+        assert select_enrichment_targets(candidates) == []
+
+    def test_hybrid_mode_still_enriches_a_capped_subset(self, monkeypatch):
+        monkeypatch.setenv("RECS_ENRICH_MODE", "hybrid")
+        candidates = [
+            make_candidate(f"A{i}", "t", tag_weight_sum=100 - i)
+            for i in range(ENRICH_TOP_ARTISTS + 10)
+        ]
+        targets = select_enrichment_targets(candidates)
+        assert 0 < len(targets) <= ENRICH_TOP_ARTISTS * ENRICH_TRACKS_PER_ARTIST
+
+    def test_unknown_mode_falls_back_to_the_default(self, monkeypatch):
+        # Default is auto, which without a novelty resolves to hybrid, so an
+        # unusable value degrades to a capped budget rather than crashing
+        monkeypatch.setenv("RECS_ENRICH_MODE", "nonsense")
+        candidates = [make_candidate("A", f"t{i}") for i in range(5)]
+        assert (
+            len(select_enrichment_targets(candidates))
+            == ENRICH_TRACKS_PER_ARTIST
+        )
+
+
+class TestEnrichSelectedTracks:
+    def _clients(self, calls):
+        class C:
+            async def fetch_track_tags_only(self, title, artist, api_key, mbid=None):
+                calls.append(title)
+                return [{"name": "shoegaze", "count": 100}]
+        return C()
+
+    async def test_skips_tracks_the_pre_selection_pass_already_fetched(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECS_ENRICH_MODE", "hybrid")
+        calls = []
+        already = make_candidate("A", "done")
+        already.lf_enriched = True
+        fresh = make_candidate("B", "todo")
+        await enrich_selected_tracks(
+            [already, fresh], self._clients(calls), "key", {"shoegaze": 10}
+        )
+        assert calls == ["todo"]
+
+    async def test_does_nothing_in_all_mode(self, monkeypatch):
+        monkeypatch.setenv("RECS_ENRICH_MODE", "all")
+        calls = []
+        await enrich_selected_tracks(
+            [make_candidate("A", "t")], self._clients(calls), "key", {}
+        )
+        assert calls == []
+
+    async def test_fetches_every_selected_track_in_final_mode(self, monkeypatch):
+        monkeypatch.setenv("RECS_ENRICH_MODE", "final")
+        calls = []
+        selected = [make_candidate("A", "t1"), make_candidate("B", "t2")]
+        await enrich_selected_tracks(
+            selected, self._clients(calls), "key", {"shoegaze": 10}
+        )
+        assert sorted(calls) == ["t1", "t2"]
+        assert all(c.lf_enriched for c in selected)
+
+
+class TestAutoEnrichMode:
+    @pytest.fixture(autouse=True)
+    def auto_mode(self, monkeypatch):
+        monkeypatch.delenv("RECS_ENRICH_MODE", raising=False)
+
+    def test_low_novelty_keeps_the_richer_hybrid_mode(self):
+        assert enrich_mode(0.0) == "hybrid"
+
+    def test_high_novelty_switches_to_final(self):
+        assert enrich_mode(1.0) == "final"
+
+    def test_switches_exactly_at_the_threshold(self):
+        assert enrich_mode(HIGH_NOVELTY_ENRICH_THRESHOLD) == "final"
+        assert enrich_mode(HIGH_NOVELTY_ENRICH_THRESHOLD - 0.01) == "hybrid"
+
+    def test_unknown_novelty_prefers_the_richer_mode(self):
+        assert enrich_mode(None) == "hybrid"
+
+    def test_explicit_env_mode_overrides_novelty(self, monkeypatch):
+        monkeypatch.setenv("RECS_ENRICH_MODE", "all")
+        assert enrich_mode(1.0) == "all"
+        assert enrich_mode(0.0) == "all"
