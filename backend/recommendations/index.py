@@ -5,24 +5,22 @@ from types import SimpleNamespace
 # Allow importing clients from the parent directory
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from .cached_clients import wrap_clients
+from .constants import (
+    RECORDING_SOURCE_LASTFM,
+    RECORDING_SOURCES,
+    recording_source,
+)
 from .pipeline import run_pipeline
 from .tags import MOOD_TAGS
 from .types import Seed, Track
 from .utils import get_field
 
+__all__ = ["Clients", "RECORDING_SOURCES", "get_recommendations"]
+
 
 class Clients(SimpleNamespace):
     pass
-
-
-# RECORDING_SOURCE env var controls which source fetch_top_recordings_for_artist
-# uses for track discovery: "listenbrainz" (default) or "lastfm"
-RECORDING_SOURCES = ("listenbrainz", "lastfm")
-
-
-def _recording_source():
-    value = os.environ.get("RECORDING_SOURCE", "listenbrainz").strip().lower()
-    return value if value in RECORDING_SOURCES else "listenbrainz"
 
 
 def _to_int(value):
@@ -59,7 +57,7 @@ def _make_real_clients():
     async def fetch_top_recordings_for_artist(
         artist_mbid, artist_name, limit, api_key
     ):
-        if _recording_source() == "lastfm":
+        if recording_source() == RECORDING_SOURCE_LASTFM:
             tracks = await lastfm.fetch_artist_top_tracks(
                 artist_name, limit, api_key
             )
@@ -77,7 +75,7 @@ def _make_real_clients():
     # per request, which gets us rate-limited), this only runs for the
     # handful of tracks that actually make it into the final results.
     async def resolve_recording_mbid(mbid, title, artist):
-        if _recording_source() != "lastfm":
+        if recording_source() != RECORDING_SOURCE_LASTFM:
             return {
                 "mbid": mbid,
                 "duration_ms": None,
@@ -107,7 +105,7 @@ async def get_recommendations(
     novelty: float = 0,
     exclude_seed_artists: bool = True,
 ) -> list:
-    clients = _make_real_clients()
+    clients = wrap_clients(_make_real_clients())
     return await run_pipeline(
         seeds,
         api_key,

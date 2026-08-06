@@ -1,7 +1,9 @@
 import asyncio
 import re
 import logging
+import time
 import httpx
+from caching.ratelimit import MB_SLOT_KEY, RedisRateLimiter
 from .http import get_client
 
 # MusicBrainz requires a meaningful User-Agent: App/Version (contact)
@@ -24,7 +26,11 @@ MB_TIMEOUT_S = 10
 
 logger = logging.getLogger(__name__)
 
-# Global lock to enforce MB rate-limiting across all concurrent requests
+# Reserves the next slot in Redis so spacing holds across
+# every worker and every request, not just within one event loop
+_mb_limiter = RedisRateLimiter(MB_SLOT_KEY, MB_MIN_INTERVAL_S)
+
+# In-process fallback for when Redis is unavailable
 _mb_lock: asyncio.Lock | None = None
 _mb_lock_loop = None
 _last_request_time = 0.0
@@ -39,30 +45,61 @@ def _get_mb_lock() -> asyncio.Lock:
     return _mb_lock
 
 
+# The last time a MusicBrainz request was made, for local rate-limiting
+# when Redis is down.The slot is spent even if the request fails,
+# so a retry has to wait
+def _stamp_request_time() -> None:
+    global _last_request_time
+    _last_request_time = time.monotonic()
+
+
+async def _mb_get(url: str, params: dict | None) -> httpx.Response:
+    return await get_client(
+        "musicbrainz",
+        timeout=MB_TIMEOUT_S,
+        follow_redirects=True,
+    ).get(url, params=params)
+
+
+async def _mb_get_locally_limited(
+    url: str, params: dict | None
+) -> httpx.Response:
+    async with _get_mb_lock():
+        elapsed = time.monotonic() - _last_request_time
+        if elapsed < MB_MIN_INTERVAL_S:
+            await asyncio.sleep(MB_MIN_INTERVAL_S - elapsed)
+        try:
+            return await _mb_get(url, params)
+        finally:
+            # A timed-out call still consumed its MB rate-limit slot,
+            # so the retry has to wait out the full interval
+            # rather than fire immediately
+            _stamp_request_time()
+
+
+# Waits for this call's turn, falling back to local limiting when Redis is down.
+# Either path spends the slot even if the call fails, so a retry waits a fresh
+# interval
+async def _mb_get_limited(url: str, params: dict | None) -> httpx.Response:
+    wait_s = await _mb_limiter.reserve()
+    if wait_s is None:
+        return await _mb_get_locally_limited(url, params)
+    if wait_s > 0:
+        await asyncio.sleep(wait_s)
+    try:
+        return await _mb_get(url, params)
+    finally:
+        _stamp_request_time()
+
+
 # Rate-limited GET against MB, retrying once on 429/503 and on transient
 # transport faults (read timeouts, dropped connections) with a short backoff
 # on top of the routine inter-request spacing
 async def mb_fetch(url: str, params: dict | None = None) -> httpx.Response:
-    global _last_request_time
     for attempt in range(MB_MAX_ATTEMPTS):
         is_last_attempt = attempt == MB_MAX_ATTEMPTS - 1
         try:
-            async with _get_mb_lock():
-                now = asyncio.get_running_loop().time()
-                elapsed = now - _last_request_time
-                if elapsed < MB_MIN_INTERVAL_S:
-                    await asyncio.sleep(MB_MIN_INTERVAL_S - elapsed)
-                try:
-                    res = await get_client(
-                        "musicbrainz",
-                        timeout=MB_TIMEOUT_S,
-                        follow_redirects=True,
-                    ).get(url, params=params)
-                finally:
-                    # A timed-out call still consumed its MB rate-limit slot,
-                    # so the retry has to wait out the full interval
-                    # rather than fire immediately
-                    _last_request_time = asyncio.get_running_loop().time()
+            res = await _mb_get_limited(url, params)
         except MB_RETRYABLE_EXCEPTIONS as exc:
             if is_last_attempt:
                 raise

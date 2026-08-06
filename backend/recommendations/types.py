@@ -12,6 +12,8 @@ class StreamingLinks:
     spotify: str
     # {"small": url, "medium": url, "large": url} (100/300/600px) or None
     artwork: Optional[dict] = None
+    # Whether the MusicBrainz lookup for this track failed
+    lookup_failed: bool = False
 
 
 @dataclass
@@ -121,9 +123,9 @@ class ScoredCandidate(Candidate):
     final_score: float = 0.0
     relevance_score: float = 0.0
     novelty_score: float = 0.0
-    # Set by MMR at pick time; see SELECTION_* in constants. Defaults to the
-    # top-match case so a candidate that never went through selection reads
-    # as ranked on score alone rather than claiming a diversity boost
+    # Set by MMR at pick time. Defaults to the top-match case so a candidate
+    # that never went through selection reads as ranked on score alone
+    # rather than claiming a diversity boost
     selection_reason: str = SELECTION_TOP_MATCH
 
 

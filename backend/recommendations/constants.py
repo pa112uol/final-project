@@ -1,4 +1,27 @@
+import os
+
 RECOMMENDATION_LIMIT = 10
+
+# RECORDING_SOURCE env var controls which source fetch_top_recordings_for_artist
+# uses for track discovery.
+RECORDING_SOURCE_LISTENBRAINZ = "listenbrainz"
+RECORDING_SOURCE_LASTFM = "lastfm"
+RECORDING_SOURCES = (RECORDING_SOURCE_LISTENBRAINZ, RECORDING_SOURCE_LASTFM)
+
+
+# Falls back to the default for anything unrecognised, so a typo cannot orphan
+# the cache namespace
+def recording_source() -> str:
+    value = (
+        os.environ.get("RECORDING_SOURCE", RECORDING_SOURCE_LISTENBRAINZ)
+        .strip()
+        .lower()
+    )
+    if value not in RECORDING_SOURCES:
+        return RECORDING_SOURCE_LISTENBRAINZ
+    return value
+
+
 # The two tag sources count in incommensurable units: Last.fm normalizes per
 # track, so its top tag is always 100 and a count is really a percentage, while
 # ListenBrainz returns raw vote totals. Each is scaled to [0,1] against its own

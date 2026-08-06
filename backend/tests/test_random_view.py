@@ -1,6 +1,6 @@
-"""Tests for the /api/random/ endpoint."""
-
+import asyncio
 import json
+import threading
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -8,15 +8,6 @@ from django.test import RequestFactory
 from django.urls import resolve
 import api.views as views
 from api.views import random_tracks
-
-
-@pytest.fixture(autouse=True)
-def clear_random_cache():
-    views.random_cache = None
-    views.random_cache_expires = 0
-    yield
-    views.random_cache = None
-    views.random_cache_expires = 0
 
 
 @pytest.fixture
@@ -61,6 +52,46 @@ def _streaming():
         spotify="https://open.spotify.com/track/test",
         artwork=None,
     )
+
+
+class TestBackgroundLoop:
+    def test_runs_the_coroutine_and_returns_its_value(self):
+        async def answer():
+            return 42
+
+        assert views._run_async(answer()) == 42
+
+    def test_propagates_exceptions_to_the_caller(self):
+        async def boom():
+            raise ValueError("nope")
+
+        with pytest.raises(ValueError, match="nope"):
+            views._run_async(boom())
+
+    def test_every_call_shares_one_loop(self):
+        async def current_loop():
+            return asyncio.get_running_loop()
+
+        assert views._run_async(current_loop()) is views._run_async(
+            current_loop()
+        )
+
+    def test_concurrent_callers_share_the_same_loop(self):
+        loops = []
+
+        async def current_loop():
+            return asyncio.get_running_loop()
+
+        def call():
+            loops.append(views._run_async(current_loop()))
+
+        threads = [threading.Thread(target=call) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert len(set(id(loop) for loop in loops)) == 1
 
 
 class TestRandomUrlRouting:
@@ -140,6 +171,16 @@ class TestRandomEndpoint:
         for field in ("appleMusic", "preview", "youtubeVideoId", "spotify"):
             assert field in streaming, f"missing streaming field: {field}"
 
+    def test_empty_pool_returns_200_with_no_tracks(self, rf):
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=AsyncMock(return_value=_mb_success([])),
+        ):
+            response = random_tracks(rf.get("/api/random/"))
+
+        assert response.status_code == 200
+        assert json.loads(response.content)["tracks"] == []
+
     def test_returns_502_when_mb_fails(self, rf):
         with patch(
             "clients.musicbrainz.mb_fetch",
@@ -169,10 +210,82 @@ class TestRandomEndpoint:
             new=AsyncMock(return_value=_streaming()),
         ):
             random_tracks(rf.get("/api/random/"))
-            views.random_cache_expires = 0
+            # Simulate the pool's TTL having elapsed
+            views.get_view_cache().delete(views.RANDOM_POOL_KEY)
             random_tracks(rf.get("/api/random/"))
 
         assert mb_mock.call_count == 2
+
+    def test_serves_stale_pool_when_refresh_fails(self, rf):
+        recordings = [_recording(mbid=f"rec-{i}") for i in range(10)]
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=AsyncMock(return_value=_mb_success(recordings)),
+        ), patch(
+            "clients.streaming.get_streaming_links",
+            new=AsyncMock(return_value=_streaming()),
+        ):
+            random_tracks(rf.get("/api/random/"))
+
+        views.get_view_cache().delete(views.RANDOM_POOL_KEY)
+
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=AsyncMock(return_value=_mb_error()),
+        ), patch(
+            "clients.streaming.get_streaming_links",
+            new=AsyncMock(return_value=_streaming()),
+        ):
+            response = random_tracks(rf.get("/api/random/"))
+
+        assert response.status_code == 200
+        assert len(json.loads(response.content)["tracks"]) > 0
+
+    def test_another_worker_holding_the_lock_serves_stale(
+        self, rf, sync_cache_enabled
+    ):
+        recordings = [_recording(mbid=f"rec-{i}") for i in range(10)]
+        mb_mock = AsyncMock(return_value=_mb_success(recordings))
+        with patch("clients.musicbrainz.mb_fetch", new=mb_mock), patch(
+            "clients.streaming.get_streaming_links",
+            new=AsyncMock(return_value=_streaming()),
+        ):
+            random_tracks(rf.get("/api/random/"))
+
+            cache = views.get_view_cache()
+            cache.delete(views.RANDOM_POOL_KEY)
+            # Stand in for another worker that is mid-refresh
+            assert cache.acquire_refresh_slot(views.RANDOM_POOL_LOCK_KEY, 30)
+
+            response = random_tracks(rf.get("/api/random/"))
+
+        assert response.status_code == 200
+        mb_mock.assert_called_once()
+
+    def test_a_slow_refresh_does_not_release_the_next_workers_lock(
+        self, rf, sync_cache_enabled
+    ):
+        cache = views.get_view_cache()
+        recordings = [_recording(mbid=f"rec-{i}") for i in range(10)]
+
+        async def slow_build(*args, **kwargs):
+            sync_cache_enabled._primary._get_client().delete(
+                views.RANDOM_POOL_LOCK_KEY
+            )
+            cache.acquire_refresh_slot(views.RANDOM_POOL_LOCK_KEY, 30)
+            return _mb_success(recordings)
+
+        with patch(
+            "clients.musicbrainz.mb_fetch",
+            new=AsyncMock(side_effect=slow_build),
+        ), patch(
+            "clients.streaming.get_streaming_links",
+            new=AsyncMock(return_value=_streaming()),
+        ):
+            random_tracks(rf.get("/api/random/"))
+
+        retaken = cache.acquire_refresh_slot(views.RANDOM_POOL_LOCK_KEY, 30)
+        assert retaken is None
 
     def test_artist_unknown_when_no_credit(self, rf):
         recording = {

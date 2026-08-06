@@ -35,9 +35,11 @@ def _artwork_urls(url: str = None) -> dict | None:
 
 
 _ITUNES_EMPTY = {"apple_music": None, "preview": None, "artwork": None}
+_FAILED = False
+_COMPLETED = True
 
 
-async def _fetch_itunes_links(artist: str, title: str) -> dict:
+async def _fetch_itunes_links(artist: str, title: str) -> tuple[dict, bool]:
     try:
         res = await get_client("streaming", **_CLIENT).get(
             ITUNES_BASE,
@@ -48,24 +50,26 @@ async def _fetch_itunes_links(artist: str, title: str) -> dict:
             },
         )
         if not res.is_success:
-            return dict(_ITUNES_EMPTY)
+            logger.warning("iTunes search HTTP %s", res.status_code)
+            return dict(_ITUNES_EMPTY), _FAILED
         data = res.json()
         item = (data.get("results") or [None])[0]
         if not item:
-            return dict(_ITUNES_EMPTY)
+            return dict(_ITUNES_EMPTY), _COMPLETED
         return {
             "apple_music": _force_https(item.get("trackViewUrl")),
             "preview": _force_https(item.get("previewUrl")),
             "artwork": _artwork_urls(item.get("artworkUrl100")),
-        }
+        }, _COMPLETED
     except Exception:
-        return dict(_ITUNES_EMPTY)
+        logger.warning("iTunes search failed", exc_info=True)
+        return dict(_ITUNES_EMPTY), _FAILED
 
 
-async def _fetch_youtube_video_id(artist: str, title: str) -> str:
+async def _fetch_youtube_video_id(artist: str, title: str) -> tuple[str, bool]:
     api_key = os.environ.get("YOUTUBE_API_KEY")
     if not api_key:
-        return None
+        return None, _COMPLETED
     try:
         res = await get_client("streaming", **_CLIENT).get(
             YOUTUBE_SEARCH_BASE,
@@ -79,21 +83,23 @@ async def _fetch_youtube_video_id(artist: str, title: str) -> str:
             },
         )
         if not res.is_success:
-            return None
+            logger.warning("YouTube search HTTP %s", res.status_code)
+            return None, _FAILED
         data = res.json()
         items = data.get("items") or []
         if not items:
-            return None
-        return (items[0].get("id") or {}).get("videoId")
+            return None, _COMPLETED
+        return (items[0].get("id") or {}).get("videoId"), _COMPLETED
     except Exception:
-        return None
+        logger.warning("YouTube search failed", exc_info=True)
+        return None, _FAILED
 
 
 async def get_streaming_links(artist: str, title: str):
     from recommendations.types import StreamingLinks
 
     query = urllib.parse.quote(f"{artist} {title}")
-    itunes, youtube_video_id = await asyncio.gather(
+    (itunes, itunes_ok), (youtube_video_id, youtube_ok) = await asyncio.gather(
         _fetch_itunes_links(artist, title),
         _fetch_youtube_video_id(artist, title),
     )
@@ -103,4 +109,5 @@ async def get_streaming_links(artist: str, title: str):
         youtube_video_id=youtube_video_id,
         spotify=f"https://open.spotify.com/search/{query}",
         artwork=itunes.get("artwork"),
+        lookup_failed=not (itunes_ok and youtube_ok),
     )

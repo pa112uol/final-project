@@ -7,22 +7,49 @@ from django.http import JsonResponse
 from django.conf import settings
 from django.views.decorators.http import require_GET
 
+from caching.config import (
+    NEGATIVE_TTL_S,
+    RANDOM_POOL_LOCK_TTL_S,
+    TTL_COVERART,
+    TTL_RANDOM_POOL,
+    TTL_RANDOM_POOL_STALE,
+)
+from caching.keys import build_key
+from caching.local import get_view_cache
+
 logger = logging.getLogger(__name__)
 
 
-def _run_async(coro):
-    """Run an async coroutine from a sync Django view."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
+# Background loop for running async code from sync Django views. This is a
+# singleton per-process, so it is shared across all threads in the worker
+_background_loop: asyncio.AbstractEventLoop | None = None
+_background_loop_thread: threading.Thread | None = None
+_background_loop_lock = threading.Lock()
 
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-    except RuntimeError:
-        pass
-    return asyncio.run(coro)
+
+def _get_background_loop() -> asyncio.AbstractEventLoop:
+    global _background_loop, _background_loop_thread
+    with _background_loop_lock:
+        if _background_loop is None or _background_loop.is_closed():
+            _background_loop = asyncio.new_event_loop()
+            _background_loop_thread = threading.Thread(
+                target=_background_loop.run_forever,
+                name="views-async-loop",
+                daemon=True,
+            )
+            _background_loop_thread.start()
+        return _background_loop
+
+
+# Runs a coroutine from a sync Django view, blocking the calling thread until it
+# completes
+def _run_async(coro):
+    loop = _get_background_loop()
+    if threading.current_thread() is _background_loop_thread:
+        raise RuntimeError(
+            "_run_async called from the background loop, await the coroutine"
+        )
+    return asyncio.run_coroutine_threadsafe(coro, loop).result()
 
 
 @require_GET
@@ -128,11 +155,15 @@ def search(request):
     return JsonResponse({"results": results})
 
 
-_coverart_cache: dict = {}
+COVERART_NAMESPACE = "coverart"
 # A "no cover art" result is often a transient failure (rate limit, timeout)
 # rather than a real fact about the recording, so it's only cached briefly.
-# A found url is cached indefinitely since that data doesn't change.
-COVERART_NEGATIVE_TTL_S = 300
+# A found url is cached for a long time since that data doesn't change.
+COVERART_NEGATIVE_TTL_S = NEGATIVE_TTL_S
+
+# The url is stored inside an envelope so a cached "no cover art" can be told
+# apart from a cache miss
+_COVERART_URL_FIELD = "url"
 
 
 @require_GET
@@ -141,18 +172,26 @@ def coverart(request):
     if not mbid:
         return JsonResponse({"error": "mbid required"}, status=400)
 
-    cached = _coverart_cache.get(mbid)
-    if cached is not None:
-        url, negative_expires_at = cached
-        if url or time.time() < negative_expires_at:
-            if not url:
-                return JsonResponse({"error": "No cover art found"}, status=404)
-            return JsonResponse({"url": url})
+    cache = get_view_cache()
+    key = build_key(COVERART_NAMESPACE, mbid)
+    cached = cache.get_json(key)
+    if isinstance(cached, dict) and _COVERART_URL_FIELD in cached:
+        return _coverart_response(cached[_COVERART_URL_FIELD])
 
     from clients.coverart import fetch_cover_art_url
 
     url = _run_async(fetch_cover_art_url(mbid))
-    _coverart_cache[mbid] = (url, time.time() + COVERART_NEGATIVE_TTL_S)
+    cache.set_json(
+        key,
+        {_COVERART_URL_FIELD: url},
+        TTL_COVERART if url else COVERART_NEGATIVE_TTL_S,
+    )
+    return _coverart_response(url)
+
+
+# A missing url is a 404 rather than an empty 200, which is what the frontend's
+# CoverArt component distinguishes on
+def _coverart_response(url):
     if not url:
         return JsonResponse({"error": "No cover art found"}, status=404)
     return JsonResponse({"url": url})
@@ -160,10 +199,17 @@ def coverart(request):
 
 RANDOM_MB_BASE = "https://musicbrainz.org/ws/2"
 RANDOM_RESPONSE_LIMIT = 5
-RANDOM_CACHE_TTL_S = 60
+RANDOM_CACHE_TTL_S = TTL_RANDOM_POOL
 
-random_cache: list[dict] | None = None
-random_cache_expires: float = 0.0
+RANDOM_POOL_KEY = build_key("random", "pool")
+# When a refresh fails there is nothing left under RANDOM_POOL_KEY to fall back on,
+# so this preserves the old behaviour where the stale Python list stayed usable
+# past its expiry instead of the endpoint 502ing
+RANDOM_POOL_STALE_KEY = build_key("random", "pool", "stale")
+RANDOM_POOL_LOCK_KEY = build_key("random", "pool", "lock")
+
+# Stops threads withi one worker from racing, which is what the original threading.Lock guarded.
+# The Redis lock handles the cross-process case the original could not.
 random_cache_lock = threading.Lock()
 
 
@@ -230,34 +276,61 @@ async def _enrich_track(track: dict) -> dict:
     }
 
 
+# Rebuilds the pool, or returns the stale copy when another worker is already
+# rebuilding it. The in-process lock is taken first so threads in this worker
+# queue behind one another rather than all contending for the Redis lock
+def _refresh_random_pool(cache) -> list[dict] | None:
+    with random_cache_lock:
+        # Re-check- another thread may have populated the pool while this one
+        # waited for the lock, which is the same double checked pattern the
+        # previous implementation used.
+        pool = cache.get_json(RANDOM_POOL_KEY)
+        if pool is not None:
+            return pool
+
+        token = cache.acquire_refresh_slot(
+            RANDOM_POOL_LOCK_KEY, RANDOM_POOL_LOCK_TTL_S
+        )
+        if not token:
+            return cache.get_json(RANDOM_POOL_STALE_KEY)
+
+        try:
+            pool = _run_async(_build_random_pool())
+        except Exception:
+            logger.error(
+                "Failed to refresh random pool from MusicBrainz",
+                exc_info=True,
+            )
+            return cache.get_json(RANDOM_POOL_STALE_KEY)
+        else:
+            cache.set_json(RANDOM_POOL_KEY, pool, RANDOM_CACHE_TTL_S)
+            cache.set_json(RANDOM_POOL_STALE_KEY, pool, TTL_RANDOM_POOL_STALE)
+            return pool
+        finally:
+            # Released only after the writes above, so another worker finding
+            # the lock free also finds the value it was waiting for. Released by
+            # token, so a refresh that outran the lock TTL cannot delete the
+            # lock the next worker has already taken
+            cache.release_refresh_slot(RANDOM_POOL_LOCK_KEY, token)
+
+
 @require_GET
 def random_tracks(request):
-    global random_cache, random_cache_expires
+    cache = get_view_cache()
+    pool = cache.get_json(RANDOM_POOL_KEY)
+    if pool is None:
+        pool = _refresh_random_pool(cache)
 
-    now = time.time()
-    if random_cache is None or now > random_cache_expires:
-        with random_cache_lock:
-            if random_cache is None or now > random_cache_expires:
-                try:
-                    pool = _run_async(_build_random_pool())
-                    random_cache = pool
-                    random_cache_expires = now + RANDOM_CACHE_TTL_S
-                except Exception:
-                    logger.error(
-                        "Failed to refresh random pool from MusicBrainz",
-                        exc_info=True,
-                    )
-                    if random_cache is None:
-                        return JsonResponse(
-                            {
-                                "error": "Failed to fetch tracks from MusicBrainz"
-                            },
-                            status=502,
-                        )
+    # None - nothing usable was ever fetched. An empty list - the fetch
+    # worked and MusicBrainz simply had nothing, which stays a 200 with no
+    # tracks as it did before
+    if pool is None:
+        return JsonResponse(
+            {"error": "Failed to fetch tracks from MusicBrainz"},
+            status=502,
+        )
 
-    selected = random.sample(
-        random_cache, min(RANDOM_RESPONSE_LIMIT, len(random_cache))
-    )
+    selected = random.sample(pool, min(RANDOM_RESPONSE_LIMIT, len(pool)))
 
     async def _enrich_all():
         return list(await asyncio.gather(*[_enrich_track(t) for t in selected]))

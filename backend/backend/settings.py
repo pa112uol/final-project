@@ -1,15 +1,23 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# BASE_DIR is the backend/ directory; backend/.env is the primary env file
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from caching.config import parse_bool  # noqa: E402
+
+# BASE_DIR is the backend/ directory, backend/.env is the primary env file
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR / ".env.local")
 load_dotenv(BASE_DIR.parent / ".env.local")
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-secret-key-change-in-production")
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY", "dev-secret-key-change-in-production"
+)
 
 DEBUG = os.environ.get("DEBUG", "True") == "True"
 
@@ -72,3 +80,6 @@ REST_FRAMEWORK = {
 # API keys read from environment
 LASTFM_API_KEY = os.environ.get("LASTFM_API_KEY", "")
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+
+REDIS_URL = os.environ.get("REDIS_URL", "")
+CACHE_ENABLED = parse_bool(os.environ.get("CACHE_ENABLED"), default=True)

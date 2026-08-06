@@ -9,7 +9,7 @@ if [ ! -f "$ROOT/backend/.venv/bin/python" ]; then
   echo "[backend] Creating virtual environment..."
   python3 -m venv "$ROOT/backend/.venv"
   echo "[backend] Installing dependencies..."
-  "$ROOT/backend/.venv/bin/pip" install -r "$ROOT/backend/requirements.txt" --quiet
+  "$ROOT/backend/.venv/bin/pip" install -r "$ROOT/backend/requirements-dev.txt" --quiet
 fi
 
 (cd "$ROOT/backend" && .venv/bin/python manage.py runserver) &

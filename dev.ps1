@@ -8,7 +8,7 @@ if (-not (Test-Path $Python)) {
     Write-Host "[backend] Creating virtual environment..."
     python -m venv "$BackendDir\.venv"
     Write-Host "[backend] Installing dependencies..."
-    & "$BackendDir\.venv\Scripts\pip.exe" install -r "$BackendDir\requirements.txt" --quiet
+    & "$BackendDir\.venv\Scripts\pip.exe" install -r "$BackendDir\requirements-dev.txt" --quiet
 }
 
 $backendJob = Start-Job -Name Backend -ScriptBlock {

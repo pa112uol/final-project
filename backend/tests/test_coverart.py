@@ -4,17 +4,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from django.test import RequestFactory
 import api.views as views
 from api.views import coverart
+from caching.config import TTL_COVERART
 from clients.coverart import _release_mbids_for_recording
 
-
-@pytest.fixture(autouse=True)
-def clear_coverart_cache():
-    views._coverart_cache.clear()
+# The cache_disabled fixture in conftest.py hands every test a fresh cache, so
+# no per-test clearing is needed here any more.
 
 
 @pytest.fixture
 def rf():
     return RequestFactory()
+
+
+def _coverart_key(mbid: str) -> str:
+    return views.build_key(views.COVERART_NAMESPACE, mbid)
 
 
 def test_missing_mbid_returns_400(rf):
@@ -24,14 +27,19 @@ def test_missing_mbid_returns_400(rf):
 
 def test_returns_url_when_art_found(rf):
     expected = "https://archive.org/download/mbid-abc/mbid-abc-500.jpg"
-    with patch("clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=expected)):
+    with patch(
+        "clients.coverart.fetch_cover_art_url",
+        new=AsyncMock(return_value=expected),
+    ):
         response = coverart(rf.get("/api/coverart/", {"mbid": "abc-123"}))
     assert response.status_code == 200
     assert json.loads(response.content)["url"] == expected
 
 
 def test_returns_404_when_no_art(rf):
-    with patch("clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)):
+    with patch(
+        "clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)
+    ):
         response = coverart(rf.get("/api/coverart/", {"mbid": "no-art-456"}))
     assert response.status_code == 404
 
@@ -45,12 +53,13 @@ def test_found_url_is_cached_without_re_fetching(rf):
 
 
 def test_negative_result_is_not_cached_forever(rf):
-    with patch("clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)):
+    with patch(
+        "clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)
+    ):
         coverart(rf.get("/api/coverart/", {"mbid": "flaky-mbid"}))
 
     # Simulate the negative cache entry's TTL having elapsed
-    url, _ = views._coverart_cache["flaky-mbid"]
-    views._coverart_cache["flaky-mbid"] = (url, 0)
+    views.get_view_cache().delete(_coverart_key("flaky-mbid"))
 
     with patch(
         "clients.coverart.fetch_cover_art_url",
@@ -58,7 +67,36 @@ def test_negative_result_is_not_cached_forever(rf):
     ):
         response = coverart(rf.get("/api/coverart/", {"mbid": "flaky-mbid"}))
     assert response.status_code == 200
-    assert json.loads(response.content)["url"] == "https://example.com/recovered.jpg"
+    assert (
+        json.loads(response.content)["url"]
+        == "https://example.com/recovered.jpg"
+    )
+
+
+def test_missing_cover_gets_the_short_negative_ttl(rf, sync_cache_enabled):
+    with patch(
+        "clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)
+    ):
+        coverart(rf.get("/api/coverart/", {"mbid": "no-art-ttl"}))
+
+    ttl = _redis_ttl(sync_cache_enabled, _coverart_key("no-art-ttl"))
+    assert 0 < ttl <= views.COVERART_NEGATIVE_TTL_S
+
+
+def test_found_cover_gets_the_long_positive_ttl(rf, sync_cache_enabled):
+    with patch(
+        "clients.coverart.fetch_cover_art_url",
+        new=AsyncMock(return_value="https://example.com/art.jpg"),
+    ):
+        coverart(rf.get("/api/coverart/", {"mbid": "has-art-ttl"}))
+
+    ttl = _redis_ttl(sync_cache_enabled, _coverart_key("has-art-ttl"))
+    assert ttl > views.COVERART_NEGATIVE_TTL_S
+    assert ttl <= TTL_COVERART
+
+
+def _redis_ttl(view_cache, key: str) -> int:
+    return view_cache._primary._get_client().ttl(key)
 
 
 def test_negative_result_within_ttl_is_not_re_fetched(rf):
