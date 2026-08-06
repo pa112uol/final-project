@@ -10,6 +10,8 @@ from recommendations.constants import (
     ENRICH_TRACKS_PER_ARTIST,
     MAX_TRACKS_PER_ARTIST,
     HIGH_NOVELTY_ENRICH_THRESHOLD,
+    SELECTION_FOR_VARIETY,
+    SELECTION_TOP_MATCH,
 )
 from recommendations.types import Seed, StreamingLinks, Candidate
 
@@ -131,6 +133,17 @@ class TestRunPipeline:
             assert hasattr(t, "streaming")
             assert isinstance(t.relevance_score, float)
             assert isinstance(t.novelty_score, float)
+
+    async def test_every_track_carries_the_reason_mmr_selected_it(self):
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, make_clients()
+        )
+        assert tracks
+        for t in tracks:
+            assert t.selection_reason in (
+                SELECTION_TOP_MATCH,
+                SELECTION_FOR_VARIETY,
+            )
 
     async def test_returns_empty_when_no_tags_can_be_derived(self):
         clients = make_clients()
@@ -506,10 +519,16 @@ class TestRunPipeline:
 
 def make_candidate(artist, title, tag_weight_sum=100, listen_count=0):
     return Candidate(
-        title=title, artist=artist, artist_mbid=f"am-{artist}",
-        mbid=f"m-{artist}-{title}", duration_ms=None,
-        tag_weight_sum=tag_weight_sum, track_tag_score=0,
-        listen_count=listen_count, user_count=0, artist_listen_count=0,
+        title=title,
+        artist=artist,
+        artist_mbid=f"am-{artist}",
+        mbid=f"m-{artist}-{title}",
+        duration_ms=None,
+        tag_weight_sum=tag_weight_sum,
+        track_tag_score=0,
+        listen_count=listen_count,
+        user_count=0,
+        artist_listen_count=0,
         tags=[],
     )
 
@@ -590,9 +609,12 @@ class TestSelectEnrichmentTargets:
 class TestEnrichSelectedTracks:
     def _clients(self, calls):
         class C:
-            async def fetch_track_tags_only(self, title, artist, api_key, mbid=None):
+            async def fetch_track_tags_only(
+                self, title, artist, api_key, mbid=None
+            ):
                 calls.append(title)
                 return [{"name": "shoegaze", "count": 100}]
+
         return C()
 
     async def test_skips_tracks_the_pre_selection_pass_already_fetched(
@@ -616,7 +638,9 @@ class TestEnrichSelectedTracks:
         )
         assert calls == []
 
-    async def test_fetches_every_selected_track_in_final_mode(self, monkeypatch):
+    async def test_fetches_every_selected_track_in_final_mode(
+        self, monkeypatch
+    ):
         monkeypatch.setenv("RECS_ENRICH_MODE", "final")
         calls = []
         selected = [make_candidate("A", "t1"), make_candidate("B", "t2")]

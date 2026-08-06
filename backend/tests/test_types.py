@@ -1,4 +1,8 @@
 import pytest
+from recommendations.constants import (
+    SELECTION_FOR_VARIETY,
+    SELECTION_TOP_MATCH,
+)
 from recommendations.types import (
     Track,
     StreamingLinks,
@@ -53,8 +57,14 @@ class TestTrackToDict:
             "relevanceScore",
             "noveltyScore",
             "tags",
+            "selectionReason",
         ):
             assert key in d, f"missing key: {key}"
+
+    def test_selection_reason_serialized_and_defaults_to_top_match(self):
+        assert make_track().to_dict()["selectionReason"] == SELECTION_TOP_MATCH
+        d = make_track(selection_reason=SELECTION_FOR_VARIETY).to_dict()
+        assert d["selectionReason"] == SELECTION_FOR_VARIETY
 
     def test_snake_case_fields_mapped_to_camel_case(self):
         t = make_track(

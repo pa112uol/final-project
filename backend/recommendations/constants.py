@@ -31,6 +31,14 @@ MOOD_CONFLICT_PENALTY = 0.5
 MMR_LAMBDA = 0.7
 MAX_TRACKS_PER_ARTIST = 2
 
+# Why a candidate won its slot. MMR order is not final_score order, so a client
+# showing only relevance/novelty can display a track above one with visibly
+# better bars and look broken. These name the actual reason: TOP_MATCH means it
+# had the best score among the candidates still in play, FOR_VARIETY means the
+# diversity term lifted it past higher scoring but more redundant ones.
+SELECTION_TOP_MATCH = "top_match"
+SELECTION_FOR_VARIETY = "for_variety"
+
 # Within recording-level obscurity: listen count (scale) vs user count (breadth)
 LISTEN_VS_USER_BLEND = 0.6
 # Recording-level obscurity vs artist-level obscurity fallback

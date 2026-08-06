@@ -1,6 +1,10 @@
 import math
-from .constants import MMR_LAMBDA
-from .utils import get_field
+from .constants import (
+    MMR_LAMBDA,
+    SELECTION_FOR_VARIETY,
+    SELECTION_TOP_MATCH,
+)
+from .utils import get_field, set_field
 
 
 def tokenize(tags: list) -> set:
@@ -41,6 +45,24 @@ def _mmr_score(item: dict, selected: list) -> float:
     return MMR_LAMBDA * final_score - (1 - MMR_LAMBDA) * max_sim
 
 
+# A pick is "for variety" exactly when something in the pool it beat had a
+# strictly better final_score, meaning the diversity term is what decided it.
+# Ties do not count: an equal score would have been a legitimate top match.
+def _selection_reason(best: dict, pool: list) -> str:
+    best_score = get_field(best["c"], "final_score")
+    outscored = any(
+        get_field(item["c"], "final_score") > best_score
+        for item in pool
+        if item is not best
+    )
+    return SELECTION_FOR_VARIETY if outscored else SELECTION_TOP_MATCH
+
+
+# Stamp the reason onto the candidate itself so it survives to the API response
+def _mark_selected(best: dict, pool: list) -> None:
+    set_field(best["c"], "selection_reason", _selection_reason(best, pool))
+
+
 def _pick_best(remaining: list, selected: list) -> int:
     best_idx = 0
     best_score = float("-inf")
@@ -73,7 +95,9 @@ def mmr_select(ranked: list, k: int) -> list:
 
     while len(selected) < k and remaining:
         best_idx = _pick_best(remaining, selected)
-        selected.append(remaining.pop(best_idx))
+        best = remaining.pop(best_idx)
+        _mark_selected(best, remaining)
+        selected.append(best)
 
     return [item["c"] for item in selected]
 
@@ -116,6 +140,9 @@ def mmr_select_balanced(
         else:
             pool = [item for item in remaining if seed in item["seeds"]]
         best = pool[_pick_best(pool, selected)]
+        # Compared against the pool it actually competed in, which under a seed
+        # quota is that seed's candidates rather than everything remaining
+        _mark_selected(best, pool)
         # Identity, not equality: two candidates could compare equal as
         # dataclasses, and remove() would drop the wrong one.
         remaining = [item for item in remaining if item is not best]

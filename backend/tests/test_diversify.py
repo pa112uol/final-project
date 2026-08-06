@@ -5,6 +5,10 @@ from recommendations.diversify import (
     mmr_select,
     mmr_select_balanced,
 )
+from recommendations.constants import (
+    SELECTION_FOR_VARIETY,
+    SELECTION_TOP_MATCH,
+)
 from recommendations.types import ScoredCandidate
 
 
@@ -79,7 +83,9 @@ class TestMmrSelect:
         ]
         assert len(mmr_select(ranked, 5)) == 5
 
-    def test_returns_all_candidates_when_k_is_greater_than_or_equal_to_ranked_length(self):
+    def test_returns_all_candidates_when_k_is_greater_than_or_equal_to_ranked_length(
+        self,
+    ):
         ranked = [
             make_scored_candidate(mbid="a"),
             make_scored_candidate(mbid="b"),
@@ -92,13 +98,17 @@ class TestMmrSelect:
     def test_selects_highest_scoring_candidate_first(self):
         ranked = [
             make_scored_candidate(mbid="best", final_score=0.9, tags=["rock"]),
-            make_scored_candidate(mbid="second", final_score=0.5, tags=["rock"]),
+            make_scored_candidate(
+                mbid="second", final_score=0.5, tags=["rock"]
+            ),
             make_scored_candidate(mbid="third", final_score=0.1, tags=["rock"]),
         ]
         result = mmr_select(ranked, 3)
         assert result[0].mbid == "best"
 
-    def test_penalizes_candidates_with_similar_tags_to_already_selected_ones(self):
+    def test_penalizes_candidates_with_similar_tags_to_already_selected_ones(
+        self,
+    ):
         # "copy" has the same tags as "best" and should be deprioritized vs
         # "diverse". Artists must differ, or same-artist redundancy would
         # dominate and mask the tag comparison under test.
@@ -135,15 +145,147 @@ class TestMmrSelect:
                 mbid="best", artist="A", final_score=0.9, tags=["shoegaze"]
             ),
             make_scored_candidate(
-                mbid="same-artist", artist="A", final_score=0.85, tags=["techno"]
+                mbid="same-artist",
+                artist="A",
+                final_score=0.85,
+                tags=["techno"],
             ),
             make_scored_candidate(
-                mbid="other-artist", artist="B", final_score=0.8, tags=["techno"]
+                mbid="other-artist",
+                artist="B",
+                final_score=0.8,
+                tags=["techno"],
             ),
         ]
         result = mmr_select(ranked, 2)
         assert result[0].mbid == "best"
         assert result[1].mbid == "other-artist"
+
+
+class TestSelectionReason:
+    def test_first_pick_is_always_a_top_match(self):
+        ranked = [
+            make_scored_candidate(mbid="best", artist="A", final_score=0.9),
+            make_scored_candidate(mbid="other", artist="B", final_score=0.5),
+        ]
+        assert mmr_select(ranked, 2)[0].selection_reason == SELECTION_TOP_MATCH
+
+    def test_marks_for_variety_when_diversity_beats_a_higher_score(self):
+        # "diverse" scores below "copy" and only wins its slot because "copy"
+        # duplicates the incumbent's tags. This is the case the UI has to
+        # explain: a card ranked above one with a visibly better bar
+        ranked = [
+            make_scored_candidate(
+                mbid="best",
+                artist="A",
+                final_score=0.9,
+                tags=["shoegaze", "dreampop"],
+            ),
+            make_scored_candidate(
+                mbid="copy",
+                artist="B",
+                final_score=0.85,
+                tags=["shoegaze", "dreampop"],
+            ),
+            make_scored_candidate(
+                mbid="diverse",
+                artist="C",
+                final_score=0.8,
+                tags=["techno", "electronic"],
+            ),
+        ]
+        result = mmr_select(ranked, 2)
+        assert result[1].mbid == "diverse"
+        assert result[1].selection_reason == SELECTION_FOR_VARIETY
+
+    def test_marks_top_match_when_the_best_scoring_candidate_wins_anyway(self):
+        # Every candidate shares tags, so the diversity penalty is uniform and
+        # cannot reorder anything- each pick is the remaining score leader
+        ranked = [
+            make_scored_candidate(
+                mbid=f"t{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.1,
+                tags=["rock"],
+            )
+            for i in range(4)
+        ]
+        for scored in mmr_select(ranked, 4):
+            assert scored.selection_reason == SELECTION_TOP_MATCH
+
+    def test_ties_on_score_do_not_count_as_variety_picks(self):
+        # An equal score would have been a top match, so only a
+        # strictly better one left behind means diversity decided the pick
+        ranked = [
+            make_scored_candidate(
+                mbid="a", artist="A", final_score=0.5, tags=["rock"]
+            ),
+            make_scored_candidate(
+                mbid="b", artist="B", final_score=0.5, tags=["jazz"]
+            ),
+        ]
+        for scored in mmr_select(ranked, 2):
+            assert scored.selection_reason == SELECTION_TOP_MATCH
+
+    def test_last_pick_with_nothing_left_behind_is_a_top_match(self):
+        ranked = [
+            make_scored_candidate(
+                mbid="a", artist="A", final_score=0.2, tags=["rock"]
+            ),
+            make_scored_candidate(
+                mbid="b", artist="B", final_score=0.9, tags=["rock"]
+            ),
+        ]
+        result = mmr_select(ranked, 2)
+        assert result[1].mbid == "a"
+        assert result[1].selection_reason == SELECTION_TOP_MATCH
+
+    def test_balanced_selection_also_stamps_a_reason_on_every_pick(self):
+        cands = [
+            make_scored_candidate(
+                mbid=f"a{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.05,
+                tags=["funk"],
+            )
+            for i in range(3)
+        ] + [
+            make_scored_candidate(
+                mbid="b0", artist="B", final_score=0.3, tags=["grunge"]
+            )
+        ]
+        mapping = {**{f"a{i}": {0} for i in range(3)}, "b0": {1}}
+        result = mmr_select_balanced(
+            cands, 4, lambda c: mapping.get(c.mbid, set()), seed_count=2
+        )
+        assert all(
+            c.selection_reason in (SELECTION_TOP_MATCH, SELECTION_FOR_VARIETY)
+            for c in result
+        )
+
+    def test_balanced_quota_pick_is_not_mislabeled_as_variety(self):
+        # "b0" is seated by its seed quota, not by the diversity term. It is
+        # the only candidate in its pool, so nothing outscored it there and it
+        # must read as a top match rather than claiming a variety boost
+        cands = [
+            make_scored_candidate(
+                mbid=f"a{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.05,
+                tags=["funk"],
+            )
+            for i in range(3)
+        ] + [
+            make_scored_candidate(
+                mbid="b0", artist="B", final_score=0.1, tags=["grunge"]
+            )
+        ]
+        mapping = {**{f"a{i}": {0} for i in range(3)}, "b0": {1}}
+        result = mmr_select_balanced(
+            cands, 2, lambda c: mapping.get(c.mbid, set()), seed_count=2
+        )
+        seated = next(c for c in result if c.mbid == "b0")
+        assert seated.selection_reason == SELECTION_TOP_MATCH
 
 
 class TestMmrSelectBalanced:
@@ -152,12 +294,18 @@ class TestMmrSelectBalanced:
     def _seed_ids_of(self, mapping):
         return lambda c: mapping.get(c.mbid, set())
 
-    def test_guarantees_each_seed_a_slot_even_when_one_seed_dominates_scores(self):
+    def test_guarantees_each_seed_a_slot_even_when_one_seed_dominates_scores(
+        self,
+    ):
         # Seed 0 owns the five highest scores; plain MMR would fill all slots
         # with it. Balanced selection must still seat seed 1.
         seed0 = [
-            make_scored_candidate(mbid=f"a{i}", artist=f"A{i}",
-                                  final_score=0.9 - i * 0.05, tags=["funk"])
+            make_scored_candidate(
+                mbid=f"a{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.05,
+                tags=["funk"],
+            )
             for i in range(5)
         ]
         seed1 = make_scored_candidate(
@@ -171,16 +319,27 @@ class TestMmrSelectBalanced:
         assert "b1" in mbids
 
     def test_splits_slots_evenly_when_both_seeds_have_candidates(self):
-        cands = (
-            [make_scored_candidate(mbid=f"a{i}", artist=f"A{i}",
-                                   final_score=0.9 - i * 0.05, tags=["funk"])
-             for i in range(5)]
-            + [make_scored_candidate(mbid=f"b{i}", artist=f"B{i}",
-                                     final_score=0.4 - i * 0.05, tags=["grunge"])
-               for i in range(5)]
-        )
-        mapping = {**{f"a{i}": {0} for i in range(5)},
-                   **{f"b{i}": {1} for i in range(5)}}
+        cands = [
+            make_scored_candidate(
+                mbid=f"a{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.05,
+                tags=["funk"],
+            )
+            for i in range(5)
+        ] + [
+            make_scored_candidate(
+                mbid=f"b{i}",
+                artist=f"B{i}",
+                final_score=0.4 - i * 0.05,
+                tags=["grunge"],
+            )
+            for i in range(5)
+        ]
+        mapping = {
+            **{f"a{i}": {0} for i in range(5)},
+            **{f"b{i}": {1} for i in range(5)},
+        }
         result = mmr_select_balanced(cands, 4, self._seed_ids_of(mapping), 2)
         from_seed0 = sum(1 for c in result if c.mbid.startswith("a"))
         from_seed1 = sum(1 for c in result if c.mbid.startswith("b"))
@@ -190,8 +349,12 @@ class TestMmrSelectBalanced:
         # Seed 1 unrepresented in the pool; selection should still return k
         # tracks rather than stalling
         cands = [
-            make_scored_candidate(mbid=f"a{i}", artist=f"A{i}",
-                                  final_score=0.9 - i * 0.1, tags=["funk"])
+            make_scored_candidate(
+                mbid=f"a{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.1,
+                tags=["funk"],
+            )
             for i in range(4)
         ]
         mapping = {f"a{i}": {0} for i in range(4)}
@@ -200,8 +363,12 @@ class TestMmrSelectBalanced:
 
     def test_single_seed_matches_plain_mmr(self):
         cands = [
-            make_scored_candidate(mbid=f"m{i}", artist=f"A{i}",
-                                  final_score=0.9 - i * 0.1, tags=["funk"])
+            make_scored_candidate(
+                mbid=f"m{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.1,
+                tags=["funk"],
+            )
             for i in range(5)
         ]
         balanced = mmr_select_balanced(cands, 3, lambda c: {0}, seed_count=1)

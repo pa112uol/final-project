@@ -32,6 +32,7 @@ from .constants import (
     DEFAULT_ENRICH_MODE,
     POST_SELECTION_ENRICH_MODES,
     HIGH_NOVELTY_ENRICH_THRESHOLD,
+    SELECTION_TOP_MATCH,
 )
 from .utils import get_field, set_field
 
@@ -456,6 +457,7 @@ async def build_track_from_candidate(candidate, clients):
     duration_ms = get_field(candidate, "duration_ms")
     rel_score = get_field(candidate, "relevance_score")
     nov_score = get_field(candidate, "novelty_score")
+    reason = get_field(candidate, "selection_reason", SELECTION_TOP_MATCH)
     tags = get_field(candidate, "tags", [])
     streaming, resolved = await asyncio.gather(
         clients.get_streaming_links(artist, title),
@@ -487,6 +489,7 @@ async def build_track_from_candidate(candidate, clients):
         relevance_score=rel_score,
         novelty_score=nov_score,
         tags=tags,
+        selection_reason=reason,
     )
 
 

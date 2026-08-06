@@ -1,14 +1,11 @@
 @import "tailwindcss";
 
 @theme {
-  /* Opaque surface stack, warm near-black. */
   --color-bg-base: #131110;
   --color-bg-header: #17140f;
   --color-bg-surface: #1b1815;
   --color-bg-raised: #221f1b;
 
-  /* Translucent fills — these sit on whatever surface is behind them, so a
-     chip reads the same inside a card as it does in the sidebar. */
   --color-fill-subtle: rgba(255, 255, 255, 0.04);
   --color-fill: rgba(255, 255, 255, 0.08);
   --color-fill-strong: rgba(255, 255, 255, 0.12);
@@ -25,8 +22,6 @@
 
   --color-amber: #f2b840;
   --color-amber-dark: #d9a230;
-  /* Desaturated amber pair for tags, which need to sit quietly next to the
-     accent rather than compete with it. */
   --color-amber-muted: #c9a44b;
   --color-amber-soft: rgba(242, 184, 64, 0.12);
 
@@ -43,10 +38,6 @@
   --shadow-card: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
-/* Novelty slider. Stays a native <input type="range"> so keyboard and
-   assistive-tech behaviour comes for free; only the paint is custom. React
-   sets --pct inline, which fills the WebKit track (Firefox has
-   ::-moz-range-progress and needs no help). */
 .range-amber {
   -webkit-appearance: none;
   appearance: none;
@@ -78,13 +69,12 @@
   background: var(--color-amber);
 }
 
-/* The thumb's dark halo is what separates it from the filled track. */
 .range-amber::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 16px;
   height: 16px;
-  margin-top: -6px; /* centres the 16px thumb on the 4px track */
+  margin-top: -6px;
   border: none;
   border-radius: 50%;
   background: var(--color-amber);
@@ -114,3 +104,4 @@
     transition: none;
   }
 }
+

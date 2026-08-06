@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, runtime_checkable
 
+from .constants import SELECTION_TOP_MATCH
+
 
 @dataclass
 class StreamingLinks:
@@ -45,6 +47,7 @@ class Track:
     relevance_score: float
     novelty_score: float
     tags: list = field(default_factory=list)
+    selection_reason: str = SELECTION_TOP_MATCH
 
     def to_dict(self):
         return {
@@ -65,6 +68,7 @@ class Track:
             "relevanceScore": self.relevance_score,
             "noveltyScore": self.novelty_score,
             "tags": self.tags,
+            "selectionReason": self.selection_reason,
         }
 
 
@@ -117,6 +121,10 @@ class ScoredCandidate(Candidate):
     final_score: float = 0.0
     relevance_score: float = 0.0
     novelty_score: float = 0.0
+    # Set by MMR at pick time; see SELECTION_* in constants. Defaults to the
+    # top-match case so a candidate that never went through selection reads
+    # as ranked on score alone rather than claiming a diversity boost
+    selection_reason: str = SELECTION_TOP_MATCH
 
 
 @runtime_checkable
