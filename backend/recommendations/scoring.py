@@ -210,7 +210,12 @@ def score_and_sort(candidates: list, novelty: float) -> list:
             1 - novelty
         ) * relevance_norm + novelty * popularity_obscurity
         final_score = _with_mood(final_score, c)
-        result.append(_as_scored_candidate(c, final_score, relevance_norm, obs))
+        # Expose the normalized obscurity
+        result.append(
+            _as_scored_candidate(
+                c, final_score, relevance_norm, popularity_obscurity
+            )
+        )
 
     result.sort(key=lambda x: x.final_score, reverse=True)
     return result

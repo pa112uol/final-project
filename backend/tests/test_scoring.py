@@ -123,6 +123,46 @@ class TestScoreAndSort:
         assert isinstance(result[0].relevance_score, float)
         assert isinstance(result[0].novelty_score, float)
 
+    def test_novelty_score_spans_full_zero_one_range(self):
+        # The novelty score is min-max scaled per result set, so the most popular
+        # candidate gets 0 and the most obscure gets 1, with everything else in between
+        popular = make_candidate(
+            listen_count=1_000_000, user_count=500_000, mbid="popular"
+        )
+        niche = make_candidate(listen_count=1_000, user_count=500, mbid="niche")
+        obscure = make_candidate(listen_count=10, user_count=5, mbid="obscure")
+        result = score_and_sort([popular, niche, obscure], 0.5)
+        scores = {r.mbid: r.novelty_score for r in result}
+        assert scores["popular"] == pytest.approx(0.0)
+        assert scores["obscure"] == pytest.approx(1.0)
+        assert 0 < scores["niche"] < 1
+
+    def test_novelty_score_matches_obscurity_term_of_final_score(self):
+        # The novelty score is the obscurity term of the final score, so at novelty=1.0
+        # the final score is exactly equal to the novelty score
+        candidates = [
+            make_candidate(listen_count=1_000_000, mbid="popular"),
+            make_candidate(listen_count=1_000, mbid="niche"),
+            make_candidate(listen_count=10, mbid="obscure"),
+        ]
+        for scored in score_and_sort(candidates, 1.0):
+            assert scored.final_score == pytest.approx(scored.novelty_score)
+
+    def test_relevance_and_novelty_share_the_same_normalized_scale(self):
+        # Both are min-max scaled per result set with each spans exactly [0, 1]
+        candidates = [
+            make_candidate(
+                tag_weight_sum=100, listen_count=1_000_000, mbid="a"
+            ),
+            make_candidate(tag_weight_sum=50, listen_count=1_000, mbid="b"),
+            make_candidate(tag_weight_sum=10, listen_count=10, mbid="c"),
+        ]
+        result = score_and_sort(candidates, 0.5)
+        for field in ("relevance_score", "novelty_score"):
+            values = [getattr(r, field) for r in result]
+            assert min(values) == pytest.approx(0.0)
+            assert max(values) == pytest.approx(1.0)
+
     def test_penalizes_candidates_with_no_track_tag_match(self):
         with_tag_match = make_candidate(
             tag_weight_sum=100,
@@ -171,16 +211,17 @@ class TestMoodScoring:
             without = score_and_sort(candidates, novelty)
             baseline = {c.mbid: c.final_score for c in without}
             explicit_zero = score_and_sort(
-                [make_candidate(**{**vars(c), "mood_score": 0.0}) for c in candidates],
+                [
+                    make_candidate(**{**vars(c), "mood_score": 0.0})
+                    for c in candidates
+                ],
                 novelty,
             )
             assert {c.mbid: c.final_score for c in explicit_zero} == baseline
 
     def test_positive_mood_score_raises_final_score(self):
         plain = make_candidate(mbid="plain", tag_weight_sum=100)
-        moody = make_candidate(
-            mbid="moody", tag_weight_sum=100, mood_score=1.0
-        )
+        moody = make_candidate(mbid="moody", tag_weight_sum=100, mood_score=1.0)
         result = score_and_sort([plain, moody], 0)
         assert result[0].mbid == "moody"
         assert result[0].final_score > result[1].final_score
@@ -195,8 +236,10 @@ class TestMoodScoring:
         assert result[1].mbid == "opposing"
 
     def test_mood_still_applies_at_maximum_novelty(self):
-        # The defect the old multiplier had: it reached final_score only via
-        # the (1 - novelty) relevance term, so at novelty=1 it did nothing
+        # At novelty=1.0, the final score is equal to the novelty score, but the mood term
+        # is still applied to the novelty score, so a candidate with positive mood_score
+        # will still outrank a candidate with neutral mood_score, even if they have the same
+        # tag_weight_sum and listen_count
         plain = make_candidate(
             mbid="plain", tag_weight_sum=100, listen_count=100
         )
