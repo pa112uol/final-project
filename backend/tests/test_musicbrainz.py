@@ -1,11 +1,14 @@
 import pytest
+import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
+from clients import musicbrainz
 from clients.musicbrainz import (
     _clean,
     _escape_mb,
     _parse_artist_track,
     _build_field_query,
     mb_fetch,
+    MB_MAX_ATTEMPTS,
     search_tracks,
     resolve_canonical_mbid,
     resolve_canonical_recording,
@@ -293,6 +296,74 @@ class TestMbFetch:
             result = await mb_fetch("https://example.com")
         assert result.status_code == 404
         assert mock_client.get.call_count == 1
+
+    # A transport fault raises out of client.get() rather than coming back as a
+    # status code, so it needs its own retry path alongside the 429/503 one.
+    @pytest.mark.parametrize(
+        "exc",
+        [
+            httpx.ReadTimeout("timed out"),
+            httpx.ConnectTimeout("timed out"),
+            httpx.ConnectError("refused"),
+            httpx.RemoteProtocolError("bad chunk"),
+        ],
+    )
+    async def test_retries_on_transient_transport_error(self, exc):
+        resp = _make_response(status_code=200)
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=[exc, resp])
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            result = await mb_fetch("https://example.com")
+        assert result is resp
+        assert mock_client.get.call_count == 2
+
+    async def test_reraises_transport_error_after_max_attempts(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ReadTimeout("timed out"))
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            with pytest.raises(httpx.ReadTimeout):
+                await mb_fetch("https://example.com")
+        assert mock_client.get.call_count == MB_MAX_ATTEMPTS
+
+    # A malformed request is a bug, not upstream load, so burning the second
+    # attempt on it only delays surfacing the real problem.
+    async def test_does_not_retry_non_transient_transport_error(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(
+            side_effect=httpx.UnsupportedProtocol("bad scheme")
+        )
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            with pytest.raises(httpx.UnsupportedProtocol):
+                await mb_fetch("https://example.com")
+        assert mock_client.get.call_count == 1
+
+    # The rate-limit clock has to advance even when the call blew up, otherwise
+    # the retry sees a stale timestamp and fires without the required spacing.
+    async def test_failed_attempt_still_stamps_rate_limit_clock(self):
+        clock_at_call = []
+
+        async def record_then_respond(*args, **kwargs):
+            clock_at_call.append(musicbrainz._last_request_time)
+            if len(clock_at_call) == 1:
+                raise httpx.ReadTimeout("timed out")
+            return _make_response()
+
+        mock_client = MagicMock()
+        mock_client.get = record_then_respond
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            with patch("clients.musicbrainz._last_request_time", 0.0):
+                await mb_fetch("https://example.com")
+
+        # The first attempt sees the reset clock; the retry must see the stamp
+        # written by the timed-out attempt's finally block.
+        assert clock_at_call[0] == 0.0
+        assert clock_at_call[1] > 0.0
+
+    async def test_search_returns_empty_when_fetch_times_out(self):
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ReadTimeout("timed out"))
+        with patch("clients.musicbrainz.get_client", return_value=mock_client):
+            assert await search_tracks("bohemian rhapsody") == []
 
 
 class TestSearchTracks:

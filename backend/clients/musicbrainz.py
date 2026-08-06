@@ -1,24 +1,30 @@
 import asyncio
 import re
 import logging
+import httpx
 from .http import get_client
 
 # MusicBrainz requires a meaningful User-Agent: App/Version (contact)
-# See https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
+# https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
 MB_BASE = "https://musicbrainz.org/ws/2"
 MB_MIN_INTERVAL_S = 1.05
 MB_RETRYABLE_STATUS_CODES = (429, 503)
+
+# Transient transport faults worth a second attempt. Deliberately excludes
+# httpx.ProtocolError and UnsupportedProtocol, which signal a bug in the
+# request rather than upstream load, so retrying them just doubles the wait.
+MB_RETRYABLE_EXCEPTIONS = (
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.RemoteProtocolError,
+)
 MB_RETRY_BACKOFF_S = 0.5
 MB_MAX_ATTEMPTS = 2
+MB_TIMEOUT_S = 10
 
 logger = logging.getLogger(__name__)
 
-# asyncio.Lock + a serial queue ensures MB requests are fully serialized.
-# Each request waits for the previous fetch + cooldown to finish before firing.
-# The lock is recreated whenever the running loop changes (mirroring
-# clients.http.get_client) since Django's per-request asyncio.run() gives
-# each request its own loop, and a Lock stays bound to whichever loop first
-# contended on it -- reusing it across loops raises RuntimeError.
+# Global lock to enforce MB rate-limiting across all concurrent requests
 _mb_lock: asyncio.Lock | None = None
 _mb_lock_loop = None
 _last_request_time = 0.0
@@ -33,22 +39,39 @@ def _get_mb_lock() -> asyncio.Lock:
     return _mb_lock
 
 
-# Rate-limited GET against MB, retrying once on 429/503 with a short backoff
-# on top of the routine inter-request spacing above.
-async def mb_fetch(url: str, params: dict | None = None):
+# Rate-limited GET against MB, retrying once on 429/503 and on transient
+# transport faults (read timeouts, dropped connections) with a short backoff
+# on top of the routine inter-request spacing
+async def mb_fetch(url: str, params: dict | None = None) -> httpx.Response:
     global _last_request_time
     for attempt in range(MB_MAX_ATTEMPTS):
-        async with _get_mb_lock():
-            now = asyncio.get_running_loop().time()
-            elapsed = now - _last_request_time
-            if elapsed < MB_MIN_INTERVAL_S:
-                await asyncio.sleep(MB_MIN_INTERVAL_S - elapsed)
-            res = await get_client(
-                "musicbrainz", timeout=10, follow_redirects=True
-            ).get(url, params=params)
-            _last_request_time = asyncio.get_running_loop().time()
-
         is_last_attempt = attempt == MB_MAX_ATTEMPTS - 1
+        try:
+            async with _get_mb_lock():
+                now = asyncio.get_running_loop().time()
+                elapsed = now - _last_request_time
+                if elapsed < MB_MIN_INTERVAL_S:
+                    await asyncio.sleep(MB_MIN_INTERVAL_S - elapsed)
+                try:
+                    res = await get_client(
+                        "musicbrainz",
+                        timeout=MB_TIMEOUT_S,
+                        follow_redirects=True,
+                    ).get(url, params=params)
+                finally:
+                    # A timed-out call still consumed its MB rate-limit slot,
+                    # so the retry has to wait out the full interval
+                    # rather than fire immediately
+                    _last_request_time = asyncio.get_running_loop().time()
+        except MB_RETRYABLE_EXCEPTIONS as exc:
+            if is_last_attempt:
+                raise
+            # The caller logs the full trace if the final attempt fails
+            # and a retry that succeeds is not noteworthy
+            logger.warning("MB fetch failed (%s), retrying", type(exc).__name__)
+            await asyncio.sleep(MB_RETRY_BACKOFF_S)
+            continue
+
         if res.status_code in MB_RETRYABLE_STATUS_CODES and not is_last_attempt:
             await asyncio.sleep(MB_RETRY_BACKOFF_S)
             continue
@@ -60,7 +83,8 @@ async def resolve_artist_mbid(name: str) -> str:
     query = f'artist:"{clean_name}"'
     try:
         res = await mb_fetch(
-            f"{MB_BASE}/artist", params={"query": query, "limit": 1, "fmt": "json"}
+            f"{MB_BASE}/artist",
+            params={"query": query, "limit": 1, "fmt": "json"},
         )
         if not res.is_success:
             return ""
