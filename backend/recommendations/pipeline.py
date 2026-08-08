@@ -2,7 +2,7 @@ import asyncio
 import logging
 import math
 import os
-from .types import Track, Release
+from .types import Track
 from .candidates import build_candidates
 from .tags import (
     build_tag_weights,
@@ -449,6 +449,8 @@ def apply_tag_floor(candidates, limit):
     return with_tag_match if excluded else candidates
 
 
+# Builds the final Track for one selected candidate. Recording resolution is
+# deferred to /api/recording/, so mbid/duration are used as-is and releases stay empty
 async def build_track_from_candidate(candidate, clients):
     title = get_field(candidate, "title")
     artist = get_field(candidate, "artist")
@@ -459,32 +461,17 @@ async def build_track_from_candidate(candidate, clients):
     nov_score = get_field(candidate, "novelty_score")
     reason = get_field(candidate, "selection_reason", SELECTION_TOP_MATCH)
     tags = get_field(candidate, "tags", [])
-    streaming, resolved = await asyncio.gather(
-        clients.get_streaming_links(artist, title),
-        clients.resolve_recording_mbid(mbid, title, artist),
-    )
-    mbid = resolved["mbid"]
-    if duration_ms is None:
-        duration_ms = resolved["duration_ms"]
-    releases = (
-        [
-            Release(
-                mbid=resolved["release_mbid"],
-                title=resolved["album"],
-                date=resolved["release_date"],
-            )
-        ]
-        if resolved["album"]
-        else []
-    )
+
+    streaming = await clients.get_streaming_links(artist, title)
+
     return Track(
         mbid=mbid,
         title=title,
         artist=artist,
         artist_mbid=artist_mbid,
         duration_ms=duration_ms,
-        first_release_date=resolved["release_date"],
-        releases=releases,
+        first_release_date=None,
+        releases=[],
         streaming=streaming,
         relevance_score=rel_score,
         novelty_score=nov_score,

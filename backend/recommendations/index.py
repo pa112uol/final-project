@@ -16,8 +16,6 @@ from .tags import MOOD_TAGS
 from .types import Seed, Track
 from .utils import get_field
 
-__all__ = ["Clients", "RECORDING_SOURCES", "get_recommendations"]
-
 
 class Clients(SimpleNamespace):
     pass
@@ -76,14 +74,10 @@ def _make_real_clients():
     # handful of tracks that actually make it into the final results.
     async def resolve_recording_mbid(mbid, title, artist):
         if recording_source() != RECORDING_SOURCE_LASTFM:
-            return {
-                "mbid": mbid,
-                "duration_ms": None,
-                "album": None,
-                "release_mbid": None,
-                "release_date": None,
-            }
-        return await musicbrainz.resolve_canonical_recording(mbid, title, artist)
+            return {"mbid": mbid, **musicbrainz.EMPTY_RECORDING}
+        return await musicbrainz.resolve_canonical_recording(
+            mbid, title, artist
+        )
 
     return Clients(
         fetch_tag_artists=lastfm.fetch_tag_artists,
@@ -116,4 +110,17 @@ async def get_recommendations(
     )
 
 
-__all__ = ["get_recommendations", "MOOD_TAGS", "Seed", "Track"]
+# Resolves one recording's canonical MusicBrainz data on demand, for the lazy
+# per-track endpoint. Shares cache entries with the pipeline's own resolution
+async def resolve_recording(mbid: str, title: str, artist: str) -> dict:
+    clients = wrap_clients(_make_real_clients())
+    return await clients.resolve_recording_mbid(mbid, title, artist)
+
+
+__all__ = [
+    "get_recommendations",
+    "resolve_recording",
+    "MOOD_TAGS",
+    "Seed",
+    "Track",
+]

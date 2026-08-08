@@ -10,48 +10,16 @@ Run with: pytest tests/test_pipeline_usersim.py -s -v
 Mirrors the assertions defined in pipeline.usersim.test.ts.
 """
 
-import os
 import time
 import asyncio
-from pathlib import Path
 import pytest
 from recommendations.index import get_recommendations
 from recommendations.types import Track
+from tests.live_env import API_KEY
 
 # Uses real Last.fm/MusicBrainz/ListenBrainz APIs and takes minutes to run
 # (serialised MusicBrainz rate limiting), excluded from the default test run
 pytestmark = pytest.mark.slow
-
-
-def _load_env():
-    """Load env vars from the standard locations, closest file wins."""
-    backend_dir = Path(__file__).resolve().parent.parent
-    candidates = [
-        # backend/.env
-        backend_dir / ".env",
-        # backend/.env.local
-        backend_dir / ".env.local",
-        # project root .env.local (Next.js convention)
-        backend_dir.parent / ".env.local",
-    ]
-    for env_path in candidates:
-        if not env_path.exists():
-            continue
-        for line in env_path.read_text().splitlines():
-            m_line = line.strip()
-            if not m_line or m_line.startswith("#"):
-                continue
-            if "=" in m_line:
-                key, _, value = m_line.partition("=")
-                key = key.strip()
-                value = value.strip()
-                if key and value:
-                    os.environ.setdefault(key, value)
-
-
-_load_env()
-
-API_KEY = os.environ.get("LASTFM_API_KEY", "")
 
 BROAD_LABELS = {
     "rock",

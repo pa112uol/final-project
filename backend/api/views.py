@@ -155,6 +155,35 @@ def search(request):
     return JsonResponse({"results": results})
 
 
+# Lazily resolves one track's MusicBrainz recording data (duration, album,
+# release date). Caching/TTL is handled by the cached client it calls
+@require_GET
+def recording(request):
+    title = (request.GET.get("title") or "").strip()
+    if not title:
+        return JsonResponse({"error": "title required"}, status=400)
+
+    mbid = (request.GET.get("mbid") or "").strip()
+    artist = (request.GET.get("artist") or "").strip()
+
+    from clients.musicbrainz import EMPTY_RECORDING
+    from recommendations.index import resolve_recording
+    from recommendations.types import resolved_to_dict
+
+    try:
+        resolved = _run_async(resolve_recording(mbid, title, artist))
+    except Exception:
+        logger.error(
+            "[recording] resolution failed for %r by %r",
+            title,
+            artist,
+            exc_info=True,
+        )
+        resolved = {"mbid": mbid, **EMPTY_RECORDING}
+
+    return JsonResponse(resolved_to_dict(resolved))
+
+
 COVERART_NAMESPACE = "coverart"
 # A "no cover art" result is often a transient failure (rate limit, timeout)
 # rather than a real fact about the recording, so it's only cached briefly.
@@ -172,6 +201,9 @@ def coverart(request):
     if not mbid:
         return JsonResponse({"error": "mbid required"}, status=400)
 
+    # Optional release the caller already resolved, so fetch_cover_art_url can skip its own lookup.
+    release_mbid = (request.GET.get("releaseMbid") or "").strip() or None
+
     cache = get_view_cache()
     key = build_key(COVERART_NAMESPACE, mbid)
     cached = cache.get_json(key)
@@ -180,7 +212,7 @@ def coverart(request):
 
     from clients.coverart import fetch_cover_art_url
 
-    url = _run_async(fetch_cover_art_url(mbid))
+    url = _run_async(fetch_cover_art_url(mbid, release_mbid))
     cache.set_json(
         key,
         {_COVERART_URL_FIELD: url},

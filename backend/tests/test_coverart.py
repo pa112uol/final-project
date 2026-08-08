@@ -5,7 +5,7 @@ from django.test import RequestFactory
 import api.views as views
 from api.views import coverart
 from caching.config import TTL_COVERART
-from clients.coverart import _release_mbids_for_recording
+from clients.coverart import _release_mbids_for_recording, fetch_cover_art_url
 
 # The cache_disabled fixture in conftest.py hands every test a fresh cache, so
 # no per-test clearing is needed here any more.
@@ -107,6 +107,34 @@ def test_negative_result_within_ttl_is_not_re_fetched(rf):
     assert mock_fetch.call_count == 1
 
 
+def test_passes_release_mbid_through_when_given(rf):
+    mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
+    with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
+        coverart(
+            rf.get(
+                "/api/coverart/",
+                {"mbid": "rec-1", "releaseMbid": "release-1"},
+            )
+        )
+    mock_fetch.assert_awaited_once_with("rec-1", "release-1")
+
+
+def test_blank_release_mbid_is_treated_as_absent(rf):
+    mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
+    with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
+        coverart(
+            rf.get("/api/coverart/", {"mbid": "rec-1", "releaseMbid": "  "})
+        )
+    mock_fetch.assert_awaited_once_with("rec-1", None)
+
+
+def test_missing_release_mbid_is_treated_as_absent(rf):
+    mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
+    with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
+        coverart(rf.get("/api/coverart/", {"mbid": "rec-1"}))
+    mock_fetch.assert_awaited_once_with("rec-1", None)
+
+
 def _mb_response(status_code, releases=None):
     resp = MagicMock()
     resp.status_code = status_code
@@ -144,3 +172,84 @@ class TestReleaseMbidsForRecording:
             result = await _release_mbids_for_recording("some-mbid")
         assert result == []
         assert mock_client.get.call_count == 2
+
+
+class TestFetchCoverArtUrl:
+    async def test_uses_the_given_release_mbid_without_discovering_releases(
+        self,
+    ):
+        with (
+            patch(
+                "clients.coverart._front_art_url",
+                new=AsyncMock(return_value="https://example.com/fast.jpg"),
+            ) as mock_front_art,
+            patch(
+                "clients.coverart._release_mbids_for_recording", new=AsyncMock()
+            ) as mock_discover,
+        ):
+            url = await fetch_cover_art_url("rec-1", release_mbid="release-1")
+        assert url == "https://example.com/fast.jpg"
+        mock_front_art.assert_awaited_once_with("release-1")
+        mock_discover.assert_not_awaited()
+
+    async def test_falls_back_to_discovery_when_given_release_has_no_art(
+        self,
+    ):
+        front_art = AsyncMock(
+            side_effect=[None, "https://example.com/found.jpg"]
+        )
+        with (
+            patch("clients.coverart._front_art_url", new=front_art),
+            patch(
+                "clients.coverart._release_mbids_for_recording",
+                new=AsyncMock(return_value=["release-1", "release-2"]),
+            ),
+        ):
+            url = await fetch_cover_art_url("rec-1", release_mbid="release-1")
+        assert url == "https://example.com/found.jpg"
+        assert front_art.await_count == 2
+
+    async def test_does_not_recheck_the_given_release_during_fallback(self):
+        front_art = AsyncMock(
+            side_effect=[None, "https://example.com/found.jpg"]
+        )
+        with (
+            patch("clients.coverart._front_art_url", new=front_art),
+            patch(
+                "clients.coverart._release_mbids_for_recording",
+                new=AsyncMock(return_value=["release-1", "release-2"]),
+            ),
+        ):
+            url = await fetch_cover_art_url("rec-1", release_mbid="release-1")
+        assert url == "https://example.com/found.jpg"
+        checked = [call.args[0] for call in front_art.await_args_list]
+        # release-1 checked once via the fast path, not again during fallback
+        assert checked == ["release-1", "release-2"]
+
+    async def test_discovers_releases_when_no_release_mbid_given(self):
+        with (
+            patch(
+                "clients.coverart._release_mbids_for_recording",
+                new=AsyncMock(return_value=["release-a"]),
+            ) as mock_discover,
+            patch(
+                "clients.coverart._front_art_url",
+                new=AsyncMock(return_value="https://example.com/a.jpg"),
+            ),
+        ):
+            url = await fetch_cover_art_url("rec-1")
+        assert url == "https://example.com/a.jpg"
+        mock_discover.assert_awaited_once_with("rec-1")
+
+    async def test_returns_none_when_nothing_has_art(self):
+        with (
+            patch(
+                "clients.coverart._front_art_url", new=AsyncMock(return_value=None)
+            ),
+            patch(
+                "clients.coverart._release_mbids_for_recording",
+                new=AsyncMock(return_value=["release-a"]),
+            ),
+        ):
+            url = await fetch_cover_art_url("rec-1", release_mbid="release-x")
+        assert url is None

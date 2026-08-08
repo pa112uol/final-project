@@ -4,6 +4,7 @@ from recommendations.pipeline import (
     select_enrichment_targets,
     enrich_selected_tracks,
     enrich_mode,
+    build_track_from_candidate,
 )
 from recommendations.constants import (
     ENRICH_TOP_ARTISTS,
@@ -240,7 +241,9 @@ class TestRunPipeline:
         assert tracks
         assert all(t.duration_ms is not None for t in tracks)
 
-    async def test_falls_back_to_resolved_duration_when_source_has_none(self):
+    # Recording resolution is deferred to /api/recording/, so a source with no
+    # duration for a track leaves it null rather than resolving it inline
+    async def test_duration_stays_null_when_source_has_none(self):
         class NoDurationClients(make_clients().__class__):
             async def fetch_top_recordings_for_artist(
                 self, mbid, name, limit, api_key
@@ -257,45 +260,22 @@ class TestRunPipeline:
                     },
                 ]
 
-            async def resolve_recording_mbid(self, mbid, title, artist):
-                return make_resolved(mbid, duration_ms=232000)
-
         tracks = await run_pipeline(
             [TEST_SEED], "fake-api-key", None, 0, NoDurationClients()
         )
         assert tracks
-        assert all(t.duration_ms == 232000 for t in tracks)
+        assert all(t.duration_ms is None for t in tracks)
 
-    async def test_populates_album_and_release_date_from_resolved_recording(
-        self,
-    ):
-        class AlbumClients(make_clients().__class__):
-            async def resolve_recording_mbid(self, mbid, title, artist):
-                return make_resolved(
-                    mbid,
-                    album="Souvlaki",
-                    release_mbid="release-souvlaki",
-                    release_date="1993-05-17",
-                )
+    async def test_never_resolves_the_recording_and_releases_stay_empty(self):
+        async def boom(mbid, title, artist):
+            raise AssertionError("resolve_recording_mbid should not be called")
 
+        clients = make_clients(resolve_recording_mbid=boom)
         tracks = await run_pipeline(
-            [TEST_SEED], "fake-api-key", None, 0, AlbumClients()
+            [TEST_SEED], "fake-api-key", None, 0, clients
         )
         assert tracks
-        for t in tracks:
-            assert t.first_release_date == "1993-05-17"
-            assert len(t.releases) == 1
-            assert t.releases[0].mbid == "release-souvlaki"
-            assert t.releases[0].title == "Souvlaki"
-            assert t.releases[0].date == "1993-05-17"
-
-    async def test_leaves_releases_empty_when_resolved_recording_has_no_album(
-        self,
-    ):
-        tracks = await run_pipeline(
-            [TEST_SEED], "fake-api-key", None, 0, make_clients()
-        )
-        assert tracks
+        assert all(t.mbid for t in tracks)
         assert all(t.first_release_date is None for t in tracks)
         assert all(t.releases == [] for t in tracks)
 
@@ -673,3 +653,46 @@ class TestAutoEnrichMode:
         monkeypatch.setenv("RECS_ENRICH_MODE", "all")
         assert enrich_mode(1.0) == "all"
         assert enrich_mode(0.0) == "all"
+
+
+class TestBuildTrackFromCandidate:
+    def _candidate(self, **overrides):
+        candidate = make_candidate("Slowdive", "Alison")
+        candidate.duration_ms = 300000
+        for k, v in overrides.items():
+            setattr(candidate, k, v)
+        return candidate
+
+    async def test_keeps_the_candidates_own_mbid_and_duration(self):
+        candidate = self._candidate()
+        track = await build_track_from_candidate(candidate, make_clients())
+        assert track.mbid == candidate.mbid
+        assert track.duration_ms == candidate.duration_ms
+
+    async def test_leaves_release_info_unresolved(self):
+        candidate = self._candidate()
+        track = await build_track_from_candidate(candidate, make_clients())
+        assert track.releases == []
+        assert track.first_release_date is None
+
+    # Recording resolution belongs to /api/recording/ now, not the pipeline
+    async def test_never_calls_resolve_recording_mbid(self):
+        async def boom(mbid, title, artist):
+            raise AssertionError("resolve_recording_mbid should not be called")
+
+        clients = make_clients(resolve_recording_mbid=boom)
+        candidate = self._candidate()
+        # Raises only if build_track_from_candidate still calls it
+        await build_track_from_candidate(candidate, clients)
+
+    async def test_still_fetches_streaming_links(self):
+        calls = []
+
+        async def get_streaming_links(artist, title):
+            calls.append((artist, title))
+            return make_streaming()
+
+        clients = make_clients(get_streaming_links=get_streaming_links)
+        candidate = self._candidate()
+        await build_track_from_candidate(candidate, clients)
+        assert calls == [(candidate.artist, candidate.title)]

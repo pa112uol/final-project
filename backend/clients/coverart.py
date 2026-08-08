@@ -29,7 +29,12 @@ async def _front_art_url(release_mbid: str) -> str | None:
         for image in res.json().get("images", []):
             if image.get("front"):
                 t = image.get("thumbnails", {})
-                url = t.get("small") or t.get("250") or t.get("large") or image.get("image")
+                url = (
+                    t.get("small")
+                    or t.get("250")
+                    or t.get("large")
+                    or image.get("image")
+                )
                 # Cover Art Archive returns http:// URLs even when queried over
                 # https; upgrade so images aren't blocked as mixed content
                 return url.replace("http://", "https://", 1) if url else None
@@ -38,9 +43,20 @@ async def _front_art_url(release_mbid: str) -> str | None:
         return None
 
 
-async def fetch_cover_art_url(recording_mbid: str) -> str | None:
-    for release_mbid in await _release_mbids_for_recording(recording_mbid):
+# Skips the MusicBrainz release lookup when the caller already resolved one.
+# Falls back to full discovery if that release has no front art
+async def fetch_cover_art_url(
+    recording_mbid: str, release_mbid: str | None = None
+) -> str | None:
+    if release_mbid:
         url = await _front_art_url(release_mbid)
+        if url:
+            return url
+
+    for candidate_mbid in await _release_mbids_for_recording(recording_mbid):
+        if candidate_mbid == release_mbid:
+            continue
+        url = await _front_art_url(candidate_mbid)
         if url:
             return url
     return None

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { ReactNode } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { ArrowUpRight } from "lucide-react";
 import CoverArt from "./CoverArt";
 import { CHIP_SHAPE, FOCUS_RING, FOCUS_RING_INSET } from "../lib/styles";
@@ -32,9 +32,21 @@ interface Track {
 // lifted it past higher scoring but more similar tracks
 type SelectionReason = "top_match" | "for_variety";
 
+// Shape of a GET /api/recording/ response, used to patch a track once its
+// canonical recording has resolved
+interface RecordingPatch {
+  mbid: string | null;
+  durationMs: number | null;
+  firstReleaseDate: string | null;
+  releases: { mbid: string; title: string; date?: string }[];
+}
+
 interface TracksListProps {
   url: string;
   novelty?: number;
+  // When set, tracks with no release info are resolved one at a time via
+  // /api/recording/ after the list renders, patching in mbid/duration/album.
+  resolveRecordings?: boolean;
 }
 
 const MAX_TAGS = 5;
@@ -67,19 +79,45 @@ function albumName(track: Track): string | null {
   return track.releases[0]?.title || null;
 }
 
+function releaseMbid(track: Track): string | undefined {
+  return track.releases[0]?.mbid || undefined;
+}
+
+// Stable identity for a track that survives its mbid changing underneath it
+// (a lazily resolved recording can replace a stale source-supplied mbid).
+function trackKey(track: { title: string; artist: string }): string {
+  return `${track.title.toLowerCase()}|||${track.artist.toLowerCase()}`;
+}
+
 // The outbound links are in a consistent order: Apple Music, Spotify, MusicBrainz.
-function outboundLinks(track: Track): { label: string; href: string }[] {
+// The MusicBrainz link is omitted while the mbid is pending resolution
+function outboundLinks(
+  track: Track,
+  pending: boolean,
+): { label: string; href: string }[] {
   const links: { label: string; href: string }[] = [];
   if (track.streaming.appleMusic)
     links.push({ label: "Apple Music", href: track.streaming.appleMusic });
   if (track.streaming.spotify)
     links.push({ label: "Spotify", href: track.streaming.spotify });
-  if (track.mbid)
+  if (track.mbid && !pending)
     links.push({
       label: "MusicBrainz",
       href: `https://musicbrainz.org/recording/${track.mbid}`,
     });
   return links;
+}
+
+// Applies a /api/recording/ patch to a track without wiping fields the
+// candidate already supplied. A null patch field must not clobber an existing value
+function mergeRecording(track: Track, patch: RecordingPatch): Track {
+  return {
+    ...track,
+    mbid: patch.mbid || track.mbid,
+    durationMs: patch.durationMs ?? track.durationMs,
+    firstReleaseDate: patch.firstReleaseDate ?? track.firstReleaseDate,
+    releases: patch.releases.length ? patch.releases : track.releases,
+  };
 }
 
 function LinkChip({ href, children }: { href: string; children: ReactNode }) {
@@ -271,11 +309,19 @@ function YouTubePlayer({ videoId, title }: { videoId: string; title: string }) {
   );
 }
 
-function TrackCard({ track, novelty }: { track: Track; novelty: number }) {
+function TrackCard({
+  track,
+  novelty,
+  pending = false,
+}: {
+  track: Track;
+  novelty: number;
+  pending?: boolean;
+}) {
   const year = releaseYear(track);
   const duration = fmtDuration(track.durationMs);
   const album = albumName(track);
-  const links = outboundLinks(track);
+  const links = outboundLinks(track, pending);
   const tags = (track.tags ?? []).slice(0, MAX_TAGS);
   // Unranked tracks have nothing to say on either axis, so the whole footer
   // goes rather than rendering empty bars
@@ -290,6 +336,8 @@ function TrackCard({ track, novelty }: { track: Track; novelty: number }) {
             mbid={track.mbid}
             artworkUrl={track.streaming.artwork?.medium}
             className="w-16 h-16 rounded-media"
+            pending={pending}
+            releaseMbid={releaseMbid(track)}
           />
         )}
         <div className="min-w-0 flex-1">
@@ -316,6 +364,12 @@ function TrackCard({ track, novelty }: { track: Track; novelty: number }) {
               )}
               {year && <span>{year}</span>}
             </p>
+          )}
+          {!album && !year && pending && (
+            <p
+              className="mt-[3px] h-[17px] w-32 rounded bg-fill animate-pulse"
+              aria-hidden="true"
+            />
           )}
         </div>
       </div>
@@ -379,37 +433,100 @@ function TrackCard({ track, novelty }: { track: Track; novelty: number }) {
   );
 }
 
-export default function TracksList({ url, novelty = 0 }: TracksListProps) {
+// Resolves one track's canonical recording, patching it into the list in
+// place. Best-effort: a failed lookup leaves the track as it arrived
+async function resolveOneTrack(
+  track: Track,
+  key: string,
+  cancelled: () => boolean,
+  setTracks: Dispatch<SetStateAction<Track[] | null>>,
+  setPendingKeys: Dispatch<SetStateAction<Set<string>>>,
+) {
+  try {
+    const params = new URLSearchParams({
+      title: track.title,
+      artist: track.artist,
+    });
+    if (track.mbid) params.set("mbid", track.mbid);
+    const res = await fetch(`/api/recording/?${params.toString()}`);
+    if (!res.ok || cancelled()) return;
+    const patch: RecordingPatch = await res.json();
+    if (cancelled()) return;
+    setTracks((prev) =>
+      prev
+        ? prev.map((t) => (trackKey(t) === key ? mergeRecording(t, patch) : t))
+        : prev,
+    );
+    // Pending clears only on a confirmed resolution, not a failed lookup
+    setPendingKeys((prev) => {
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  } catch {
+    // Leave the track pending and move on to the next one
+  }
+}
+
+export default function TracksList({
+  url,
+  novelty = 0,
+  resolveRecordings = false,
+}: TracksListProps) {
   const [tracks, setTracks] = useState<Track[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingKeys, setPendingKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     setTracks(null);
-    fetch(url)
-      .then((res) => {
-        if (!res.ok)
-          return res
-            .json()
-            .then((d) => Promise.reject(d.error || "Request failed"));
-        return res.json();
-      })
-      .then((data) => {
-        if (!cancelled) setTracks(data.tracks || []);
-      })
-      .catch((err) => {
+    setPendingKeys(new Set());
+
+    async function run() {
+      let list: Track[];
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          const d = await res.json().catch(() => ({}));
+          throw new Error(d.error || "Request failed");
+        }
+        const data = await res.json();
+        list = data.tracks || [];
+      } catch (err) {
         if (!cancelled) setError(String(err));
-      })
-      .finally(() => {
+        return;
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+      if (cancelled) return;
+      setTracks(list);
+
+      if (!resolveRecordings) return;
+      const targets = list.filter((t) => t.releases.length === 0 && t.title);
+      if (targets.length === 0) return;
+      setPendingKeys(new Set(targets.map(trackKey)));
+
+      // Sequential, not parallel: requests share the same rate-limited MusicBrainz call anyway
+      for (const t of targets) {
+        if (cancelled) return;
+        await resolveOneTrack(
+          t,
+          trackKey(t),
+          () => cancelled,
+          setTracks,
+          setPendingKeys,
+        );
+      }
+    }
+
+    run();
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, resolveRecordings]);
 
   if (loading) {
     return (
@@ -464,11 +581,13 @@ export default function TracksList({ url, novelty = 0 }: TracksListProps) {
         <OrderingNote novelty={novelty} hasVarietyPicks={hasVarietyPicks} />
       )}
       <div className="space-y-5">
-        {tracks.map((t) => (
+        {tracks.map((t, i) => (
           <TrackCard
-            key={t.mbid || `${t.title}-${t.artist}`}
+            // Index-qualified since trackKey alone can collide for /api/random/ results
+            key={`${trackKey(t)}|||${i}`}
             track={t}
             novelty={novelty}
+            pending={pendingKeys.has(trackKey(t))}
           />
         ))}
       </div>

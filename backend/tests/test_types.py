@@ -10,6 +10,8 @@ from recommendations.types import (
     Candidate,
     ScoredCandidate,
     Seed,
+    releases_from_resolved,
+    resolved_to_dict,
 )
 
 
@@ -22,6 +24,18 @@ def make_streaming(**kwargs):
     }
     defaults.update(kwargs)
     return StreamingLinks(**defaults)
+
+
+def make_resolved(**kwargs):
+    defaults = {
+        "mbid": "resolved-mbid-1",
+        "duration_ms": 238000,
+        "album": "The Bends",
+        "release_mbid": "release-mbid-1",
+        "release_date": "1995-03-13",
+    }
+    defaults.update(kwargs)
+    return defaults
 
 
 def make_track(**kwargs):
@@ -182,3 +196,62 @@ class TestDataclassInstantiation:
         assert sc.final_score == 0.0
         assert sc.relevance_score == 0.0
         assert sc.novelty_score == 0.0
+
+
+class TestReleasesFromResolved:
+    def test_returns_one_release_when_album_present(self):
+        releases = releases_from_resolved(make_resolved())
+        assert len(releases) == 1
+        r = releases[0]
+        assert r.mbid == "release-mbid-1"
+        assert r.title == "The Bends"
+        assert r.date == "1995-03-13"
+
+    def test_returns_empty_list_when_album_missing(self):
+        assert releases_from_resolved(make_resolved(album=None)) == []
+
+    def test_returns_empty_list_when_album_is_empty_string(self):
+        assert releases_from_resolved(make_resolved(album="")) == []
+
+    def test_tolerates_null_release_mbid(self):
+        releases = releases_from_resolved(make_resolved(release_mbid=None))
+        assert releases[0].mbid is None
+        assert releases[0].title == "The Bends"
+
+
+class TestResolvedToDict:
+    def test_camel_cases_the_expected_keys(self):
+        d = resolved_to_dict(make_resolved())
+        assert set(d.keys()) == {
+            "mbid",
+            "durationMs",
+            "firstReleaseDate",
+            "releases",
+        }
+
+    def test_maps_fields_through(self):
+        d = resolved_to_dict(make_resolved())
+        assert d["mbid"] == "resolved-mbid-1"
+        assert d["durationMs"] == 238000
+        assert d["firstReleaseDate"] == "1995-03-13"
+        assert d["releases"] == [
+            {
+                "mbid": "release-mbid-1",
+                "title": "The Bends",
+                "date": "1995-03-13",
+            }
+        ]
+
+    def test_preserves_nulls_when_nothing_resolved(self):
+        resolved = {
+            "mbid": "echoed-mbid",
+            "duration_ms": None,
+            "album": None,
+            "release_mbid": None,
+            "release_date": None,
+        }
+        d = resolved_to_dict(resolved)
+        assert d["mbid"] == "echoed-mbid"
+        assert d["durationMs"] is None
+        assert d["firstReleaseDate"] is None
+        assert d["releases"] == []

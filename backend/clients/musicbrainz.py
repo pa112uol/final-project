@@ -373,7 +373,9 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
     return results[:10]
 
 
-_EMPTY_RECORDING = {
+# Recording-detail fields shared by every code path that resolves nothing
+# (no MBID match, non-MusicBrainz source, or a resolution failure)
+EMPTY_RECORDING = {
     "duration_ms": None,
     "album": None,
     "release_mbid": None,
@@ -404,7 +406,7 @@ async def resolve_canonical_recording(
                 "release_date": top["release_date"],
             }
 
-    return {"mbid": mbid, **_EMPTY_RECORDING}
+    return {"mbid": mbid, **EMPTY_RECORDING}
 
 
 async def resolve_canonical_mbid(

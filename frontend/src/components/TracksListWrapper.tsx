@@ -67,7 +67,12 @@ export default function TracksListWrapper() {
       <main className="px-5 py-6 lg:px-10 lg:py-8">
         <div className="max-w-[760px] mx-auto">
           <PageHeader title="Similar tracks" />
-          <TracksList key={apiUrl} url={apiUrl} novelty={novelty} />
+          <TracksList
+            key={apiUrl}
+            url={apiUrl}
+            novelty={novelty}
+            resolveRecordings
+          />
         </div>
       </main>
     </div>

@@ -4,12 +4,20 @@ interface CoverArtProps {
   mbid: string;
   artworkUrl?: string | null;
   className?: string;
+  // True while mbid is still the source's stale value, not yet patched by the
+  // lazy recording lookup. Holds off the mbid-driven fetch until it lands.
+  pending?: boolean;
+  // The release the recording lookup already resolved, if any, so
+  // /api/coverart/ can skip its own MusicBrainz release lookup.
+  releaseMbid?: string;
 }
 
 export default function CoverArt({
   mbid,
   artworkUrl,
   className = "w-16 h-16 rounded-lg",
+  pending = false,
+  releaseMbid,
 }: CoverArtProps) {
   const [url, setUrl] = useState<string | null>(artworkUrl ?? null);
   const [fetching, setFetching] = useState(!artworkUrl);
@@ -18,14 +26,21 @@ export default function CoverArt({
 
   const handleLoad = useCallback(() => setImgReady(true), []);
 
-  // ArtworkUrl is a pre-resolved iTunes image that ships with
-  // the track already, so it skips the /api/coverart request entirely.
-  // Falling back to the mbid-driven fetch only happens when it's absent.
+  // ArtworkUrl is a pre-resolved image, so it skips the /api/coverart request entirely.
+  // Keyed only on artworkUrl, not mbid, so a later mbid patch doesn't re-fade a loaded image.
   useEffect(() => {
-    if (artworkUrl) {
-      setUrl(artworkUrl);
-      setFetching(false);
-      setImgReady(false);
+    if (!artworkUrl) return;
+    setUrl(artworkUrl);
+    setFetching(false);
+    setImgReady(false);
+  }, [artworkUrl]);
+
+  // Falls back to the mbid-driven fetch only when there's no iTunes artwork
+  useEffect(() => {
+    if (artworkUrl) return;
+
+    if (pending) {
+      setFetching(true);
       return;
     }
 
@@ -33,7 +48,9 @@ export default function CoverArt({
     setUrl(null);
     setFetching(true);
     setImgReady(false);
-    fetch(`/api/coverart/?mbid=${encodeURIComponent(mbid)}`)
+    const params = new URLSearchParams({ mbid });
+    if (releaseMbid) params.set("releaseMbid", releaseMbid);
+    fetch(`/api/coverart/?${params.toString()}`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => {
         if (!cancelled && data?.url) setUrl(data.url);
@@ -45,7 +62,7 @@ export default function CoverArt({
     return () => {
       cancelled = true;
     };
-  }, [mbid, artworkUrl]);
+  }, [mbid, artworkUrl, pending, releaseMbid]);
 
   // Handle images already in the browser cache
   useEffect(() => {

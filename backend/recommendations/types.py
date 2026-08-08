@@ -36,6 +36,33 @@ def _release_to_dict(r):
     return r
 
 
+# The single element release list a resolved recording dict produces, used
+# by resolved_to_dict for the lazy per-track endpoint's response shape
+def releases_from_resolved(resolved: dict) -> list:
+    if not resolved.get("album"):
+        return []
+    return [
+        Release(
+            mbid=resolved.get("release_mbid"),
+            title=resolved["album"],
+            date=resolved.get("release_date"),
+        )
+    ]
+
+
+# camelCase view of the Track fields recording resolution supplies, matching
+# Track.to_dict so a client can merge the patch field for field
+def resolved_to_dict(resolved: dict) -> dict:
+    return {
+        "mbid": resolved.get("mbid"),
+        "durationMs": resolved.get("duration_ms"),
+        "firstReleaseDate": resolved.get("release_date"),
+        "releases": [
+            _release_to_dict(r) for r in releases_from_resolved(resolved)
+        ],
+    }
+
+
 @dataclass
 class Track:
     mbid: str
