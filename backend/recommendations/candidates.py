@@ -12,13 +12,19 @@ LB_CONCURRENCY = 5
 
 # Artists ranked higher in tag.getTopArtists are stronger genre representatives.
 # An NDCG style log discount weights rank 1 at 1.0 and rank 30 at 0.20
-def _rank_decay(rank):
+def _rank_decay(rank: int) -> float:
     return 1 / math.log2(rank + 2)
 
 
 async def accumulate_artist_scores_from_tag_page(
-    tag, tag_weight, page_idx, api_key, clients, artist_scores, artist_tags
-):
+    tag: str,
+    tag_weight: float,
+    page_idx: int,
+    api_key: str,
+    clients,
+    artist_scores: dict,
+    artist_tags: dict,
+) -> None:
     try:
         artists = await clients.fetch_tag_artists(
             tag, page_idx + 1, ARTISTS_PER_TAG, api_key
@@ -55,8 +61,8 @@ async def accumulate_artist_scores_from_tag_page(
 
 
 async def score_artists_across_all_tag_pages(
-    top_tags, pages_to_fetch, api_key, clients
-):
+    top_tags: list, pages_to_fetch: int, api_key: str, clients
+) -> tuple:
     artist_scores = {}
     artist_tags = {}
     fetch_tasks = [
@@ -77,7 +83,7 @@ async def score_artists_across_all_tag_pages(
 
 
 # Resolve missing artist MBIDs via MusicBrainz (serialised by mb_fetch queue).
-async def resolve_artist_mbid_if_missing(artist, clients):
+async def resolve_artist_mbid_if_missing(artist: dict, clients) -> None:
     if not artist["mbid"]:
         resolved = await clients.resolve_artist_mbid(artist["name"])
         artist["mbid"] = resolved
@@ -88,7 +94,7 @@ async def resolve_artist_mbid_if_missing(artist, clients):
         )
 
 
-async def resolve_missing_mbids_for_artists(top_artists, clients):
+async def resolve_missing_mbids_for_artists(top_artists: list, clients) -> None:
     await asyncio.gather(
         *[
             resolve_artist_mbid_if_missing(artist, clients)
@@ -98,8 +104,13 @@ async def resolve_missing_mbids_for_artists(top_artists, clients):
 
 
 async def fetch_recordings_for_artist(
-    artist, clients, sem, artist_tags, candidates, api_key
-):
+    artist: dict,
+    clients,
+    sem: asyncio.Semaphore,
+    artist_tags: dict,
+    candidates: dict,
+    api_key: str,
+) -> None:
     if not artist["mbid"]:
         return
     async with sem:
@@ -142,8 +153,8 @@ async def fetch_recordings_for_artist(
 
 
 async def fetch_recordings_for_all_artists(
-    top_artists, clients, artist_tags, api_key
-):
+    top_artists: list, clients, artist_tags: dict, api_key: str
+) -> dict:
     candidates = {}
     sem = asyncio.Semaphore(LB_CONCURRENCY)
     await asyncio.gather(
@@ -170,7 +181,8 @@ async def build_candidates(
     # tail of less popular artists enters the pool. Page 1 is always included
     # so relevant artists are never dropped at any novelty level
     pages_to_fetch = 1 + round(novelty * 2)  # 1-3 pages
-    top_artists_count = round(TOP_ARTISTS_COUNT * (1 + novelty))  # 15-30
+    # Scales with TOP_ARTISTS_COUNT, not a fixed range -- currently 20-40
+    top_artists_count = round(TOP_ARTISTS_COUNT * (1 + novelty))
 
     # Phase A: score artists by how many weighted tags they appear in
     artist_scores, artist_tags = await score_artists_across_all_tag_pages(

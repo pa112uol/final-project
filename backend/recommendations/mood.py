@@ -1,7 +1,7 @@
 import logging
 
 from .constants import MOOD_CONFLICT_PENALTY
-from .tags import MOOD_TAGS, normalize_tag
+from .tags import MOOD_TAGS, normalize_for_match
 from .utils import get_field, set_field
 
 logger = logging.getLogger(__name__)
@@ -93,14 +93,6 @@ MOOD_CONFLICTS: dict[str, tuple[str, ...]] = {
     "romantic": ("angry",),
     "focus": ("energetic", "angry"),
 }
-
-
-# Collapse a tag to the form the vocabularies are keyed by: hyphens become
-# spaces, case and surrounding whitespace are dropped. This is what lets
-# "-melancholic-" and "Trip-Hop" match plain words; the old exact-equality
-# check missed both.
-def normalize_for_match(tag: str) -> str:
-    return " ".join(normalize_tag(tag).lower().split())
 
 
 def _build_vocabulary(mood: str) -> dict[str, float]:

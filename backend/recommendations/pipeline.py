@@ -10,7 +10,7 @@ from .tags import (
     rank_tags_per_seed,
     distinctive_tags_per_seed,
     seeds_matched_by_track,
-    normalize_tag,
+    normalize_for_match,
     is_noise_tag,
     BROAD_FETCH_TAGS,
 )
@@ -34,26 +34,16 @@ from .constants import (
     HIGH_NOVELTY_ENRICH_THRESHOLD,
     SELECTION_TOP_MATCH,
 )
-from .utils import get_field, set_field
+from .utils import get_field, set_field, env_flag
 
 logger = logging.getLogger(__name__)
-
-
-# Opt-in per-seed slot quota at final selection. Off by default so behaviour is
-# unchanged unless explicitly enabled
-def _seed_balanced_enabled() -> bool:
-    return os.environ.get("RECS_SEED_BALANCED", "").lower() in (
-        "1",
-        "true",
-        "yes",
-    )
 
 
 # Select the final RECOMMENDATION_LIMIT tracks, optionally guaranteeing each
 # seed a share of the slots when the feature is enabled and there is more than
 # one seed
-def select_final_tracks(pre_mmr, seed_tag_sets, limit):
-    if _seed_balanced_enabled() and len(seed_tag_sets) > 1:
+def select_final_tracks(pre_mmr: list, seed_tag_sets: list, limit: int) -> list:
+    if env_flag("RECS_SEED_BALANCED") and len(seed_tag_sets) > 1:
         distinctive = distinctive_tags_per_seed(seed_tag_sets)
 
         def seed_ids_of(candidate):
@@ -72,7 +62,7 @@ def select_final_tracks(pre_mmr, seed_tag_sets, limit):
 
 
 # Log the tags associated with a seed
-def _log_seed_tags(kind, title, tags):
+def _log_seed_tags(kind: str, title: str, tags: list) -> None:
     logger.info(
         "%s for %s: %s",
         kind,
@@ -85,7 +75,7 @@ def _log_seed_tags(kind, title, tags):
 
 
 # Log the number of candidates remaining after a deduplication stage
-def _log_dedup_stage(stage, before_count, after_count):
+def _log_dedup_stage(stage: str, before_count: int, after_count: int) -> None:
     logger.info(
         "[pipeline:dedup] after %s:%d (removed:%d)",
         stage,
@@ -95,7 +85,7 @@ def _log_dedup_stage(stage, before_count, after_count):
 
 
 # Log the final selected candidates with their scores
-def _log_final_candidates(top):
+def _log_final_candidates(top: list) -> None:
     logger.info(
         "[candidates:final]\n%s",
         "\n".join(
@@ -110,7 +100,7 @@ def _log_final_candidates(top):
     )
 
 
-async def fetch_and_merge_seed_tags(seed, clients, api_key):
+async def fetch_and_merge_seed_tags(seed, clients, api_key: str) -> list:
     mbid = get_field(seed, "mbid")
     title = get_field(seed, "title")
     artist = get_field(seed, "artist")
@@ -126,8 +116,8 @@ async def fetch_and_merge_seed_tags(seed, clients, api_key):
     return merge_tags(lb_tags, lf_tags)
 
 
-def _is_specific_tag(tag, seed_artist_names):
-    norm = normalize_tag(tag).lower()
+def _is_specific_tag(tag: str, seed_artist_names: set) -> bool:
+    norm = normalize_for_match(tag)
     return (
         norm not in BROAD_FETCH_TAGS
         and norm not in seed_artist_names
@@ -141,7 +131,9 @@ def _is_specific_tag(tag, seed_artist_names):
 # filtered here, leaving single-seed tags whose IDF term is then a constant -
 # so the pooled ranking degenerates into raw tag counts and a two-seed query
 # silently becomes a one-seed query
-def _round_robin_seed_tags(per_seed_tags, weight_of, seed_artist_names):
+def _round_robin_seed_tags(
+    per_seed_tags: list, weight_of: dict, seed_artist_names: set
+) -> tuple:
     queues = [
         [t for t in tags if _is_specific_tag(t, seed_artist_names)]
         for tags in per_seed_tags
@@ -153,7 +145,7 @@ def _round_robin_seed_tags(per_seed_tags, weight_of, seed_artist_names):
             if depth >= len(queue) or len(chosen) >= TOP_TAGS_COUNT:
                 continue
             tag = queue[depth]
-            norm = normalize_tag(tag).lower()
+            norm = normalize_for_match(tag)
             if norm not in seen:
                 seen.add(norm)
                 chosen.append((tag, weight_of.get(norm, 0)))
@@ -164,7 +156,9 @@ def _round_robin_seed_tags(per_seed_tags, weight_of, seed_artist_names):
 
 # Prefer specific tags for fetching. Fallback to broad ones only when fewer
 # than 2 specific tags exist (e.g. a pure rock seed with no sub-genre)
-def select_fetch_tags(sorted_tags, seed_artist_names, per_seed_tags=None):
+def select_fetch_tags(
+    sorted_tags: list, seed_artist_names: set, per_seed_tags: list | None = None
+) -> list:
     specific_tags = [
         (tag, w)
         for tag, w in sorted_tags
@@ -175,14 +169,14 @@ def select_fetch_tags(sorted_tags, seed_artist_names, per_seed_tags=None):
         return [
             (tag, w)
             for tag, w in sorted_tags
-            if normalize_tag(tag).lower() not in seed_artist_names
+            if normalize_for_match(tag) not in seed_artist_names
             and not is_noise_tag(tag)
         ][:TOP_TAGS_COUNT]
 
     if not per_seed_tags or len(per_seed_tags) < 2:
         return specific_tags[:TOP_TAGS_COUNT]
 
-    weight_of = {normalize_tag(tag).lower(): w for tag, w in sorted_tags}
+    weight_of = {normalize_for_match(tag): w for tag, w in sorted_tags}
     chosen, seen = _round_robin_seed_tags(
         per_seed_tags, weight_of, seed_artist_names
     )
@@ -190,8 +184,9 @@ def select_fetch_tags(sorted_tags, seed_artist_names, per_seed_tags=None):
     for tag, w in specific_tags:
         if len(chosen) >= TOP_TAGS_COUNT:
             break
-        if normalize_tag(tag).lower() not in seen:
-            seen.add(normalize_tag(tag).lower())
+        norm = normalize_for_match(tag)
+        if norm not in seen:
+            seen.add(norm)
             chosen.append((tag, w))
     return chosen
 
@@ -201,11 +196,11 @@ def select_fetch_tags(sorted_tags, seed_artist_names, per_seed_tags=None):
 # for merely carrying more tags which matters because LF enrichment tags some
 # candidates and not others. The seed profile's norm is omitted since it is
 # constant across candidates, so it would scale every score alike without reranking
-def compute_track_tag_score(tags, normalized_tag_weights):
+def compute_track_tag_score(tags: list, normalized_tag_weights: dict) -> float:
     if not tags:
         return 0.0
     matched = sum(
-        normalized_tag_weights.get(normalize_tag(t.lower()), 0) for t in tags
+        normalized_tag_weights.get(normalize_for_match(t), 0) for t in tags
     )
     if not matched:
         return 0.0
@@ -213,7 +208,9 @@ def compute_track_tag_score(tags, normalized_tag_weights):
 
 
 # Compute track-level tag scores against the weighted seed profile
-def score_candidates_by_seed_tags(candidates, normalized_tag_weights):
+def score_candidates_by_seed_tags(
+    candidates: list, normalized_tag_weights: dict
+) -> None:
     for c in candidates:
         tags = get_field(c, "tags")
         score = compute_track_tag_score(tags, normalized_tag_weights)
@@ -223,8 +220,8 @@ def score_candidates_by_seed_tags(candidates, normalized_tag_weights):
 # Deduplicate candidates by seed filtering, MBID, and title. Log the number of
 # candidates removed at each stage for visibility into the pipeline's behaviour
 def filter_and_deduplicate_candidates(
-    raw_candidates, seeds, exclude_seed_artists
-):
+    raw_candidates: list, seeds: list, exclude_seed_artists: bool
+) -> list:
     after_filter_seeds = filter_seeds(
         raw_candidates, seeds, exclude_seed_artists
     )
@@ -297,8 +294,8 @@ def select_enrichment_targets(
 
 
 async def enrich_candidate_with_lf_tags(
-    candidate, clients, api_key, normalized_tag_weights
-):
+    candidate, clients, api_key: str, normalized_tag_weights: dict
+) -> bool:
     title = get_field(candidate, "title")
     artist = get_field(candidate, "artist")
     mbid = get_field(candidate, "mbid")
@@ -397,7 +394,7 @@ async def enrich_selected_tracks(
 
 
 # For tracks with no listen count, fall back to artist-level popularity
-async def apply_artist_popularity_fallback(candidates, clients):
+async def apply_artist_popularity_fallback(candidates: list, clients) -> None:
     artist_mbids = [
         get_field(c, "artist_mbid")
         for c in candidates
@@ -413,7 +410,7 @@ async def apply_artist_popularity_fallback(candidates, clients):
                 set_field(c, "artist_listen_count", count)
 
 
-def apply_artist_cap(scored, max_per_artist):
+def apply_artist_cap(scored: list, max_per_artist: int) -> list:
     artist_track_count = {}
     dropped = []
     kept = []
@@ -436,7 +433,7 @@ def apply_artist_cap(scored, max_per_artist):
     return kept
 
 
-def apply_tag_floor(candidates, limit):
+def apply_tag_floor(candidates: list, limit: int) -> list:
     with_tag_match = [
         c for c in candidates if get_field(c, "track_tag_score") > 0
     ]
@@ -533,8 +530,7 @@ async def run_pipeline(
     )
 
     normalized_tag_weights = {
-        normalize_tag(tag.lower()): weight
-        for tag, weight in tag_weights.items()
+        normalize_for_match(tag): weight for tag, weight in tag_weights.items()
     }
     score_candidates_by_seed_tags(raw_candidates, normalized_tag_weights)
 

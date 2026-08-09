@@ -112,6 +112,12 @@ def normalize_tag(tag: str) -> str:
     return tag.replace("-", " ")
 
 
+# Canonical form for comparing tags against a vocabulary. Every "same tag"
+# lookup goes through here so casing/hyphen/whitespace variants don't diverge
+def normalize_for_match(tag: str) -> str:
+    return " ".join(normalize_tag(tag).lower().split())
+
+
 # Numeric tags ("-1001740215468") and specific year tags ("2019", "1990s")
 # that slip past BROAD_FETCH_TAGS produce useless artist lists from
 # tag.getTopArtists
@@ -125,7 +131,7 @@ def is_noise_tag(tag: str) -> bool:
     if re.fullmatch(r"\d{2}s", tag):
         # abbreviated decades: 70s, 80s, 90s
         return True
-    if normalize_tag(tag).lower() in GEO_TAGS:
+    if normalize_for_match(tag) in GEO_TAGS:
         # nationality/place tags: american, british, california
         return True
     return False
@@ -242,7 +248,7 @@ def distinctive_tags_per_seed(
 ) -> list:
     per_seed = [
         {
-            normalize_tag(get_field(entry, "name").lower())
+            normalize_for_match(get_field(entry, "name"))
             for entry in sorted(tags, key=lambda e: -get_field(e, "count", 0))[
                 :top_n
             ]
@@ -265,7 +271,7 @@ def distinctive_tags_per_seed(
 # Which seeds a track reflects, by its tags. A track can reflect several seeds
 # at once that is a bridge result, not an error
 def seeds_matched_by_track(track_tags: list, distinctive: list) -> set:
-    tags = {normalize_tag(t.lower()) for t in track_tags}
+    tags = {normalize_for_match(t) for t in track_tags}
     return {
         index for index, seed_tags in enumerate(distinctive) if tags & seed_tags
     }
