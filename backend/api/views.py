@@ -105,6 +105,9 @@ def recommendations(request):
         }
         for i, mbid in enumerate(mbids)
     ]
+    if len(seeds) > settings.MAX_SEED_TRACKS:
+        log("input", {"seedsDropped": len(seeds) - settings.MAX_SEED_TRACKS})
+        seeds = seeds[: settings.MAX_SEED_TRACKS]
 
     log("input", {"seeds": seeds, "mood": mood_raw, "novelty": novelty})
 

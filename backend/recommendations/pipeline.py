@@ -90,7 +90,7 @@ def _log_final_candidates(top: list) -> None:
         "[candidates:final]\n%s",
         "\n".join(
             f'  [{i + 1}] "{get_field(c, "title")}"'
-            f' -- {get_field(c, "artist")}'
+            f' - {get_field(c, "artist")}'
             f'\n       mbid:{get_field(c, "mbid") or "none"}'
             f'\n       relevance:{get_field(c, "relevance_score"):.3f}'
             f' novelty:{get_field(c, "novelty_score"):.3f}'

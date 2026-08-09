@@ -83,3 +83,14 @@ YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 CACHE_ENABLED = parse_bool(os.environ.get("CACHE_ENABLED"), default=True)
+
+
+# Parse int environment variables with a default fallback
+def _parse_int(value: str | None, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_SEED_TRACKS = _parse_int(os.environ.get("MAX_SEED_TRACKS"), default=5)

@@ -181,7 +181,7 @@ async def build_candidates(
     # tail of less popular artists enters the pool. Page 1 is always included
     # so relevant artists are never dropped at any novelty level
     pages_to_fetch = 1 + round(novelty * 2)  # 1-3 pages
-    # Scales with TOP_ARTISTS_COUNT, not a fixed range -- currently 20-40
+    # Scales with TOP_ARTISTS_COUNT
     top_artists_count = round(TOP_ARTISTS_COUNT * (1 + novelty))
 
     # Phase A: score artists by how many weighted tags they appear in

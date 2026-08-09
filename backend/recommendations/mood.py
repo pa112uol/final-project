@@ -156,7 +156,7 @@ def _log_coverage(mood: str, matched: int, opposed: int, total: int) -> None:
     if not matched:
         logger.warning(
             '[pipeline:mood] mood="%s" matched none of %d candidates '
-            "(%d opposed) -- results will barely differ from an "
+            "(%d opposed) - results will barely differ from an "
             "unfiltered request",
             mood,
             total,
@@ -168,7 +168,7 @@ def _log_coverage(mood: str, matched: int, opposed: int, total: int) -> None:
     # anything. It means the seed's whole neighbourhood already fits the mood
     if matched == total:
         logger.info(
-            '[pipeline:mood] mood="%s" matched all %d candidates -- '
+            '[pipeline:mood] mood="%s" matched all %d candidates - '
             "the seed's neighbourhood already fits, so ranking is unchanged",
             mood,
             total,
