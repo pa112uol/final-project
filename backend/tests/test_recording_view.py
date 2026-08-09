@@ -105,29 +105,6 @@ def test_echoes_the_supplied_mbid_when_nothing_resolves(rf):
     assert data["releases"] == []
 
 
-def test_returns_stub_without_touching_musicbrainz_when_source_is_not_lastfm(
-    rf, monkeypatch
-):
-    monkeypatch.setenv("RECORDING_SOURCE", "listenbrainz")
-
-    async def boom(*args, **kwargs):
-        raise AssertionError("MusicBrainz should not be called")
-
-    with patch(
-        "clients.musicbrainz.resolve_canonical_recording", new=boom
-    ):
-        response = recording(
-            rf.get(
-                "/api/recording/",
-                {"title": "Alison", "artist": "Slowdive", "mbid": "lb-mbid"},
-            )
-        )
-    assert response.status_code == 200
-    data = json.loads(response.content)
-    assert data["mbid"] == "lb-mbid"
-    assert data["releases"] == []
-
-
 def test_resolution_failure_falls_back_to_the_echo_stub(rf):
     with patch(
         "recommendations.index.resolve_recording",

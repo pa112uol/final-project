@@ -17,7 +17,6 @@ from caching.config import (
 )
 from caching.keys import build_key
 
-from .constants import recording_source
 from .types import StreamingLinks
 
 logger = logging.getLogger(__name__)
@@ -122,7 +121,7 @@ def _cached_fetch_top_recordings_for_artist(inner):
     ):
         return await _read_through(
             NS_TOP_RECORDINGS,
-            [recording_source(), artist_mbid, artist_name, limit],
+            [artist_mbid, artist_name, limit],
             TTL_TOP_RECORDINGS,
             lambda: inner(artist_mbid, artist_name, limit, api_key),
         )
@@ -162,7 +161,7 @@ def _cached_resolve_recording_mbid(inner):
     async def resolve_recording_mbid(mbid, title, artist):
         return await _read_through(
             NS_RECORDING_MBID,
-            [recording_source(), mbid, title, artist],
+            [mbid, title, artist],
             TTL_RECORDING_MBID,
             lambda: inner(mbid, title, artist),
             is_positive=_recording_was_resolved,

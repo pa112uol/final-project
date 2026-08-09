@@ -1,26 +1,4 @@
-import os
-
 RECOMMENDATION_LIMIT = 10
-
-# RECORDING_SOURCE env var controls which source fetch_top_recordings_for_artist
-# uses for track discovery.
-RECORDING_SOURCE_LISTENBRAINZ = "listenbrainz"
-RECORDING_SOURCE_LASTFM = "lastfm"
-RECORDING_SOURCES = (RECORDING_SOURCE_LISTENBRAINZ, RECORDING_SOURCE_LASTFM)
-
-
-# Falls back to the default for anything unrecognised, so a typo cannot orphan
-# the cache namespace
-def recording_source() -> str:
-    value = (
-        os.environ.get("RECORDING_SOURCE", RECORDING_SOURCE_LISTENBRAINZ)
-        .strip()
-        .lower()
-    )
-    if value not in RECORDING_SOURCES:
-        return RECORDING_SOURCE_LISTENBRAINZ
-    return value
-
 
 # The two tag sources count in incommensurable units: Last.fm normalizes per
 # track, so its top tag is always 100 and a count is really a percentage, while
@@ -71,11 +49,11 @@ ARTIST_VS_TRACK_TAG_BLEND = 0.6
 
 # Enrichment costs one HTTP call per candidate (~91 at novelty 0, ~182 at
 # novelty 1, to return 10 tracks), so these cap how much gets enriched.
-# The cap is on artists, not tracks: with RECORDING_SOURCE=lastfm the recordings
-# arrive untagged, so before enrichment an artist's tracks differ only in listen
-# count and ranking tracks just ranks artists. Instead pick the top artists (an
-# artist-level choice from artist-level signal), then keep the most listened
-# tracks of each.
+# The cap is on artists, not tracks: recordings arrive untagged from Last.fm's
+# top-tracks endpoint, so before enrichment an artist's tracks differ only in
+# listen count and ranking tracks just ranks artists. Instead pick the top
+# artists (an artist-level choice from artist-level signal), then keep the
+# most listened tracks of each.
 ENRICH_TOP_ARTISTS = 15
 # Above MAX_TRACKS_PER_ARTIST so the artist cap still has a choice to make
 ENRICH_TRACKS_PER_ARTIST = 3

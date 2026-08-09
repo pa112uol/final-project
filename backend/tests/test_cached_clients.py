@@ -17,7 +17,6 @@ from recommendations.cached_clients import (
     NS_STREAMING,
     wrap_clients,
 )
-from recommendations.constants import recording_source
 from recommendations.types import StreamingLinks
 
 API_KEY = "secret-lastfm-key"
@@ -306,7 +305,6 @@ class TestRecordingResolution:
         ttl = await async_cache_enabled._get_client().ttl(
             build_key(
                 NS_RECORDING_MBID,
-                recording_source(),
                 "m-1",
                 "Creep",
                 "Radiohead",
@@ -327,7 +325,6 @@ class TestRecordingResolution:
         ttl = await async_cache_enabled._get_client().ttl(
             build_key(
                 NS_RECORDING_MBID,
-                recording_source(),
                 "m-1",
                 "Creep",
                 "Radiohead",
@@ -350,7 +347,6 @@ class TestRecordingResolution:
         ttl = await async_cache_enabled._get_client().ttl(
             build_key(
                 NS_RECORDING_MBID,
-                recording_source(),
                 "m-1",
                 "Creep",
                 "Radiohead",
@@ -546,63 +542,3 @@ class TestPipelineIntegration:
         tracks = await self._run(wrap_clients(make_clients()))
         assert len(tracks) > 0
 
-
-class TestRecordingSourceIsolation:
-    async def test_switching_source_does_not_reuse_the_entry(
-        self, async_cache_enabled, monkeypatch
-    ):
-        clients = SimpleNamespace(
-            fetch_top_recordings_for_artist=AsyncMock(
-                return_value=[{"mbid": "r-1"}]
-            )
-        )
-        cached = wrap_clients(clients)
-
-        monkeypatch.setenv("RECORDING_SOURCE", "listenbrainz")
-        await cached.fetch_top_recordings_for_artist(
-            "a-1", "Radiohead", 5, API_KEY
-        )
-        monkeypatch.setenv("RECORDING_SOURCE", "lastfm")
-        await cached.fetch_top_recordings_for_artist(
-            "a-1", "Radiohead", 5, API_KEY
-        )
-
-        assert clients.fetch_top_recordings_for_artist.call_count == 2
-
-    async def test_same_source_reuses_the_entry(
-        self, async_cache_enabled, monkeypatch
-    ):
-        clients = SimpleNamespace(
-            resolve_recording_mbid=AsyncMock(
-                return_value=_resolved_recording("r-1")
-            )
-        )
-        cached = wrap_clients(clients)
-
-        monkeypatch.setenv("RECORDING_SOURCE", "lastfm")
-        await cached.resolve_recording_mbid("m-1", "Creep", "Radiohead")
-        await cached.resolve_recording_mbid("m-1", "Creep", "Radiohead")
-
-        assert clients.resolve_recording_mbid.call_count == 1
-
-    # The wrapper and the pipeline have to agree on the source name
-    async def test_an_invalid_source_shares_the_default_namespace(
-        self, async_cache_enabled, monkeypatch
-    ):
-        clients = SimpleNamespace(
-            fetch_top_recordings_for_artist=AsyncMock(
-                return_value=[{"mbid": "r-1"}]
-            )
-        )
-        cached = wrap_clients(clients)
-
-        monkeypatch.setenv("RECORDING_SOURCE", "listenbrainz")
-        await cached.fetch_top_recordings_for_artist(
-            "a-1", "Radiohead", 5, API_KEY
-        )
-        monkeypatch.setenv("RECORDING_SOURCE", "listenbrians")  # typo
-        await cached.fetch_top_recordings_for_artist(
-            "a-1", "Radiohead", 5, API_KEY
-        )
-
-        assert clients.fetch_top_recordings_for_artist.call_count == 1

@@ -6,11 +6,6 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from .cached_clients import wrap_clients
-from .constants import (
-    RECORDING_SOURCE_LASTFM,
-    RECORDING_SOURCES,
-    recording_source,
-)
 from .pipeline import run_pipeline
 from .tags import MOOD_TAGS
 from .types import Seed, Track
@@ -52,39 +47,26 @@ def _lastfm_track_to_recording(track, fallback_artist_mbid):
 def _make_real_clients():
     from clients import lastfm, listenbrainz, musicbrainz, streaming
 
+    # Discovers artist tracks via Last.fm, not ListenBrainz's top-recordings-for-artist
     async def fetch_top_recordings_for_artist(
         artist_mbid, artist_name, limit, api_key
     ):
-        if recording_source() == RECORDING_SOURCE_LASTFM:
-            tracks = await lastfm.fetch_artist_top_tracks(
-                artist_name, limit, api_key
-            )
-            return [
-                recording
-                for t in tracks
-                if (recording := _lastfm_track_to_recording(t, artist_mbid))
-            ]
-        return await listenbrainz.fetch_artist_top_recordings(
-            artist_mbid, limit
+        tracks = await lastfm.fetch_artist_top_tracks(
+            artist_name, limit, api_key
         )
-
-    # Last.fm's track mbids are frequently stale or missing entirely. Rather
-    # than resolving every candidate up front (hundreds of MusicBrainz calls
-    # per request, which gets us rate-limited), this only runs for the
-    # handful of tracks that actually make it into the final results.
-    async def resolve_recording_mbid(mbid, title, artist):
-        if recording_source() != RECORDING_SOURCE_LASTFM:
-            return {"mbid": mbid, **musicbrainz.EMPTY_RECORDING}
-        return await musicbrainz.resolve_canonical_recording(
-            mbid, title, artist
-        )
+        return [
+            recording
+            for t in tracks
+            if (recording := _lastfm_track_to_recording(t, artist_mbid))
+        ]
 
     return Clients(
         fetch_tag_artists=lastfm.fetch_tag_artists,
         fetch_track_tags=lastfm.fetch_track_tags,
         fetch_track_tags_only=lastfm.fetch_track_tags_only,
         fetch_top_recordings_for_artist=fetch_top_recordings_for_artist,
-        resolve_recording_mbid=resolve_recording_mbid,
+        # Resolved lazily per track, not for every candidate: Last.fm mbids are often stale
+        resolve_recording_mbid=musicbrainz.resolve_canonical_recording,
         fetch_recording_tags=listenbrainz.fetch_recording_tags,
         fetch_artist_popularity=listenbrainz.fetch_artist_popularity,
         resolve_artist_mbid=musicbrainz.resolve_artist_mbid,
