@@ -12,7 +12,7 @@ if [ ! -f "$ROOT/backend/.venv/bin/python" ]; then
   "$ROOT/backend/.venv/bin/pip" install -r "$ROOT/backend/requirements-dev.txt" --quiet
 fi
 
-(cd "$ROOT/backend" && .venv/bin/python manage.py runserver) &
+(cd "$ROOT/backend" && .venv/bin/python -m uvicorn app.main:app --reload --port 8000) &
 (cd "$ROOT/frontend" && npm install --silent && npm run dev) &
 
 wait

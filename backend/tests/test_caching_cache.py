@@ -8,7 +8,7 @@ from redis import ConnectionError as RedisConnectionError
 
 from caching.async_cache import AsyncRedisCache
 from caching.circuit import CircuitBreaker
-from caching.local import BoundedTTLCache, FallbackCache
+from caching.local import AsyncFallbackCache, BoundedTTLCache, FallbackCache
 from caching.serialization import SerializationError, dumps, loads
 from caching.sync_cache import SyncRedisCache
 
@@ -296,6 +296,45 @@ class TestAsyncCache:
         await async_cache.aclose()
         assert async_cache._clients == {}
 
+    async def test_acquire_lock_is_exclusive(self, async_cache):
+        assert await async_cache.acquire_lock("lock", ttl=30)
+        assert await async_cache.acquire_lock("lock", ttl=30) is None
+
+    # A lock that is released can be reacquired, and the token is distinct from
+    # the first one so a stale holder cannot release it.
+    async def test_released_lock_can_be_reacquired(self, async_cache):
+        token = await async_cache.acquire_lock("lock", ttl=30)
+        await async_cache.release_lock("lock", token)
+        assert await async_cache.acquire_lock("lock", ttl=30)
+
+    async def test_each_acquisition_gets_a_distinct_token(self, async_cache):
+        first = await async_cache.acquire_lock("lock", ttl=30)
+        await async_cache.release_lock("lock", first)
+        assert await async_cache.acquire_lock("lock", ttl=30) != first
+
+    # A lock that is released with a stale token must not release the lock its
+    # successor took, or both will rebuild the same value at once
+    async def test_release_with_a_stale_token_leaves_the_lock_alone(
+        self, async_cache
+    ):
+        stale = await async_cache.acquire_lock("lock", ttl=30)
+        await async_cache._get_client().delete("lock")
+        successor = await async_cache.acquire_lock("lock", ttl=30)
+
+        await async_cache.release_lock("lock", stale)
+
+        assert await async_cache.acquire_lock("lock", ttl=30) is None
+        assert successor is not None
+
+    async def test_release_without_a_token_is_a_no_op(self, async_cache):
+        await async_cache.acquire_lock("lock", ttl=30)
+        await async_cache.release_lock("lock", None)
+        assert await async_cache.acquire_lock("lock", ttl=30) is None
+
+    async def test_acquire_lock_returns_none_when_disabled(self):
+        cache = AsyncRedisCache(connect=_broken_connect, enabled=_disabled)
+        assert await cache.acquire_lock("lock", ttl=30) is None
+
 
 class TestCircuitBreaker:
     def test_starts_closed(self):
@@ -506,3 +545,233 @@ class TestFallbackCache:
         assert cache.get_json("k") is None
         primary.fail = True
         assert cache.get_json("k") is None
+
+
+# Async counterpart of _FlakyCache, for AsyncFallbackCache's fallback tests
+class _AsyncFlakyCache:
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+        self._tripped = False
+        self._entries: dict[str, object] = {}
+
+    @property
+    def is_healthy(self) -> bool:
+        return not self._tripped
+
+    def heal(self) -> None:
+        self._tripped = False
+
+    def _record(self, failed: bool) -> bool:
+        self._tripped = failed
+        return not failed
+
+    async def get_json(self, key: str):
+        if not self._record(self.fail):
+            return None
+        return self._entries.get(key)
+
+    async def set_json(self, key: str, value: object, ttl: int) -> bool:
+        if not self._record(self.fail):
+            return False
+        self._entries[key] = value
+        return True
+
+    async def delete(self, key: str) -> bool:
+        if not self._record(self.fail):
+            return False
+        self._entries.pop(key, None)
+        return True
+
+
+class TestAsyncFallbackCache:
+    async def test_uses_redis_when_healthy(self, async_cache):
+        cache = AsyncFallbackCache(async_cache)
+        await cache.set_json("k", {"v": 1}, ttl=60)
+        assert await async_cache.get_json("k") == {"v": 1}
+
+    async def test_falls_back_to_local_when_redis_is_disabled(self):
+        primary = AsyncRedisCache(connect=_broken_connect, enabled=_disabled)
+        cache = AsyncFallbackCache(primary)
+        await cache.set_json("k", {"v": 1}, ttl=60)
+        assert await cache.get_json("k") == {"v": 1}
+
+    async def test_delete_works_on_the_local_tier(self):
+        cache = AsyncFallbackCache(
+            AsyncRedisCache(connect=_broken_connect, enabled=_disabled)
+        )
+        await cache.set_json("k", {"v": 1}, ttl=60)
+        await cache.delete("k")
+        assert await cache.get_json("k") is None
+
+    # Without Redis there is nothing to coordinate between processes so the
+    # caller must be told to go ahead rather than being blocked forever
+    async def test_refresh_slot_is_granted_when_redis_is_unavailable(self):
+        cache = AsyncFallbackCache(
+            AsyncRedisCache(connect=_broken_connect, enabled=_disabled)
+        )
+        assert await cache.acquire_refresh_slot("lock", ttl=30)
+        assert await cache.acquire_refresh_slot("lock", ttl=30)
+
+    async def test_refresh_slot_is_exclusive_when_redis_is_available(
+        self, async_cache
+    ):
+        cache = AsyncFallbackCache(async_cache)
+        assert await cache.acquire_refresh_slot("lock", ttl=30)
+        assert await cache.acquire_refresh_slot("lock", ttl=30) is None
+
+    async def test_released_refresh_slot_can_be_retaken(self, async_cache):
+        cache = AsyncFallbackCache(async_cache)
+        token = await cache.acquire_refresh_slot("lock", ttl=30)
+        await cache.release_refresh_slot("lock", token)
+        assert await cache.acquire_refresh_slot("lock", ttl=30)
+
+    async def test_stale_holder_cannot_release_the_successors_slot(
+        self, async_cache
+    ):
+        cache = AsyncFallbackCache(async_cache)
+        stale = await cache.acquire_refresh_slot("lock", ttl=30)
+        await async_cache._get_client().delete("lock")
+        await cache.acquire_refresh_slot("lock", ttl=30)
+
+        await cache.release_refresh_slot("lock", stale)
+
+        assert await cache.acquire_refresh_slot("lock", ttl=30) is None
+
+    async def test_a_failed_primary_read_falls_through_to_local(self):
+        primary = _AsyncFlakyCache(fail=True)
+        cache = AsyncFallbackCache(primary)
+        await cache.set_json("k", {"v": 1}, ttl=60)
+
+        primary.heal()
+        assert await cache.get_json("k") == {"v": 1}
+
+    async def test_a_failed_primary_write_is_kept_locally(self):
+        primary = _AsyncFlakyCache(fail=True)
+        cache = AsyncFallbackCache(primary)
+
+        assert await cache.set_json("k", {"v": 1}, ttl=60) is True
+
+        primary.fail = False
+        assert await cache.get_json("k") == {"v": 1}
+
+    async def test_a_healthy_primary_miss_stays_a_miss(self, async_cache):
+        cache = AsyncFallbackCache(async_cache)
+        assert await cache.get_json("never-written") is None
+
+    async def test_delete_clears_both_tiers(self):
+        primary = _AsyncFlakyCache(fail=True)
+        cache = AsyncFallbackCache(primary)
+        await cache.set_json("k", {"v": 1}, ttl=60)
+
+        primary.fail = False
+        await primary.set_json("k", {"v": 2}, ttl=60)
+        await cache.delete("k")
+
+        assert await cache.get_json("k") is None
+        primary.fail = True
+        assert await cache.get_json("k") is None
+
+
+# Wraps FallbackCache so parity tests can await it exactly like
+# AsyncFallbackCache letting both run through one shared test body
+class _SyncFallbackAdapter:
+    def __init__(self, primary):
+        self._cache = FallbackCache(primary)
+
+    async def get_json(self, key):
+        return self._cache.get_json(key)
+
+    async def set_json(self, key, value, ttl):
+        return self._cache.set_json(key, value, ttl)
+
+    async def delete(self, key):
+        return self._cache.delete(key)
+
+
+class _AsyncFallbackAdapter:
+    def __init__(self, primary):
+        self._cache = AsyncFallbackCache(primary)
+
+    async def get_json(self, key):
+        return await self._cache.get_json(key)
+
+    async def set_json(self, key, value, ttl):
+        return await self._cache.set_json(key, value, ttl)
+
+    async def delete(self, key):
+        return await self._cache.delete(key)
+
+
+# Runs identical scenarios against both hand-synced implementations through a
+# common async interface, catching the two implementations silently diverging
+@pytest.mark.parametrize(
+    "adapter_cls, flaky_cls",
+    [
+        (_SyncFallbackAdapter, _FlakyCache),
+        (_AsyncFallbackAdapter, _AsyncFlakyCache),
+    ],
+    ids=["sync", "async"],
+)
+class TestFallbackParity:
+    async def test_healthy_primary_round_trips(self, adapter_cls, flaky_cls):
+        cache = adapter_cls(flaky_cls(fail=False))
+        await cache.set_json("k", {"v": 1}, ttl=60)
+        assert await cache.get_json("k") == {"v": 1}
+
+    async def test_failed_primary_read_falls_through_to_local(
+        self, adapter_cls, flaky_cls
+    ):
+        primary = flaky_cls(fail=True)
+        cache = adapter_cls(primary)
+        await cache.set_json("k", {"v": 1}, ttl=60)
+
+        primary.heal()
+        assert await cache.get_json("k") == {"v": 1}
+
+    async def test_failed_primary_write_is_kept_locally(
+        self, adapter_cls, flaky_cls
+    ):
+        primary = flaky_cls(fail=True)
+        cache = adapter_cls(primary)
+        assert await cache.set_json("k", {"v": 1}, ttl=60) is True
+
+        primary.fail = False
+        assert await cache.get_json("k") == {"v": 1}
+
+    async def test_delete_clears_both_tiers(self, adapter_cls, flaky_cls):
+        primary = flaky_cls(fail=True)
+        cache = adapter_cls(primary)
+        await cache.set_json("k", {"v": 1}, ttl=60)
+
+        primary.fail = False
+        # Lands in the primary tier since it is healthy again
+        await cache.set_json("k", {"v": 2}, ttl=60)
+        await cache.delete("k")
+
+        assert await cache.get_json("k") is None
+        primary.fail = True
+        assert await cache.get_json("k") is None
+
+    async def test_a_healthy_primary_miss_stays_a_miss(
+        self, adapter_cls, flaky_cls
+    ):
+        cache = adapter_cls(flaky_cls(fail=False))
+        assert await cache.get_json("never-written") is None
+
+
+# Checked against the real Sync/AsyncRedisCache primaries rather than the
+# Flaky doubles above since only the real ones implement acquire_lock
+class TestFallbackRefreshSlotParity:
+    async def test_granted_when_primary_unavailable_sync(self):
+        cache = FallbackCache(
+            SyncRedisCache(connect=_broken_connect, enabled=_disabled)
+        )
+        assert cache.acquire_refresh_slot("lock", ttl=30)
+        assert cache.acquire_refresh_slot("lock", ttl=30)
+
+    async def test_granted_when_primary_unavailable_async(self):
+        cache = AsyncFallbackCache(
+            AsyncRedisCache(connect=_broken_connect, enabled=_disabled)
+        )
+        assert await cache.acquire_refresh_slot("lock", ttl=30)
+        assert await cache.acquire_refresh_slot("lock", ttl=30)

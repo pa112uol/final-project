@@ -11,5 +11,6 @@ __pycache__/
 .env.*
 
 demo/
+bench/
 Dockerfile
 .dockerignore

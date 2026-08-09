@@ -34,6 +34,7 @@ frontend/build/
 /docs
 /references
 backend/demo
+backend/bench
 
 # debug
 npm-debug.log*

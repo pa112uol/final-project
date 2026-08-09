@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def _lb_client():
     kwargs = dict(
         timeout=15,
-        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
     )
     token = os.environ.get("LISTENBRAINZ_API_KEY")
     if token:

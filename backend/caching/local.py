@@ -52,13 +52,21 @@ class BoundedTTLCache:
 LOCAL_SLOT_TOKEN = "local"
 
 
-# A cache that uses a primary cache (Redis) when it is healthy and
-# falls back to an in-process cache when it is not
-class FallbackCache:
+# Shared constructor/state between FallbackCache and AsyncFallbackCache. The
+# read/write methods stay separate since one awaits the primary and one does not
+class _FallbackCacheBase:
 
     def __init__(self, primary, local: BoundedTTLCache | None = None):
         self._primary = primary
         self._local = local if local is not None else BoundedTTLCache()
+
+    def clear_local(self) -> None:
+        self._local.clear()
+
+
+# A cache that uses a primary cache (Redis) when it is healthy and
+# falls back to an in-process cache when it is not
+class FallbackCache(_FallbackCacheBase):
 
     # Returns the value from the primary cache if it is healthy, otherwise from the
     # local cache
@@ -99,9 +107,6 @@ class FallbackCache:
         if token and token != LOCAL_SLOT_TOKEN and self._primary.is_healthy:
             self._primary.release_lock(key, token)
 
-    def clear_local(self) -> None:
-        self._local.clear()
-
 
 _view_cache: FallbackCache | None = None
 
@@ -118,3 +123,56 @@ def get_view_cache() -> FallbackCache:
 def set_view_cache(cache: FallbackCache | None) -> None:
     global _view_cache
     _view_cache = cache
+
+
+# Async counterpart of FallbackCache, for view code that runs on the event
+# loop and must never block it on a sync Redis call
+class AsyncFallbackCache(_FallbackCacheBase):
+
+    async def get_json(self, key: str):
+        if self._primary.is_healthy:
+            value = await self._primary.get_json(key)
+            if value is not None:
+                return value
+            if self._primary.is_healthy:
+                return None
+        return self._local.get(key)
+
+    async def set_json(self, key: str, value: object, ttl: int) -> bool:
+        if self._primary.is_healthy:
+            if await self._primary.set_json(key, value, ttl):
+                return True
+        self._local.set(key, value, ttl)
+        return True
+
+    async def delete(self, key: str) -> bool:
+        if self._primary.is_healthy:
+            await self._primary.delete(key)
+        self._local.delete(key)
+        return True
+
+    async def acquire_refresh_slot(self, key: str, ttl: int) -> str | None:
+        if self._primary.is_healthy:
+            return await self._primary.acquire_lock(key, ttl)
+        return LOCAL_SLOT_TOKEN
+
+    async def release_refresh_slot(self, key: str, token: str | None) -> None:
+        if token and token != LOCAL_SLOT_TOKEN and self._primary.is_healthy:
+            await self._primary.release_lock(key, token)
+
+
+_async_view_cache: AsyncFallbackCache | None = None
+
+
+def get_async_view_cache() -> AsyncFallbackCache:
+    global _async_view_cache
+    if _async_view_cache is None:
+        from .async_cache import get_async_cache
+
+        _async_view_cache = AsyncFallbackCache(get_async_cache())
+    return _async_view_cache
+
+
+def set_async_view_cache(cache: AsyncFallbackCache | None) -> None:
+    global _async_view_cache
+    _async_view_cache = cache

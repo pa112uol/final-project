@@ -1,28 +1,36 @@
 import logging
 import httpx
-from .http import get_client
+from .http import UpstreamError, get_client
 
 LASTFM_BASE = "https://ws.audioscrobbler.com/2.0"
 
 logger = logging.getLogger(__name__)
 
+# A single recommendations request fans out dozens of Last.fm calls; under
+# FastAPI's real request concurrency the old max_connections=20 became the
+# throughput ceiling rather than any upstream limit
 _CLIENT = dict(
     timeout=10,
-    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    limits=httpx.Limits(max_connections=60, max_keepalive_connections=30),
 )
 
 
-async def _lf_fetch(params: dict, api_key: str):
+# Raises UpstreamError on failure rather than returning None, so a transient
+# outage is never mistaken for a genuine empty result by the read-through cache
+async def _lf_fetch(params: dict, api_key: str) -> dict:
     all_params = dict(params)
     all_params["api_key"] = api_key
     all_params["format"] = "json"
     try:
         res = await get_client("lastfm", **_CLIENT).get(LASTFM_BASE, params=all_params)
-        if not res.is_success:
-            return None
+    except httpx.HTTPError as exc:
+        raise UpstreamError(f"Last.fm request failed: {exc}") from exc
+    if not res.is_success:
+        raise UpstreamError(f"Last.fm returned HTTP {res.status_code}")
+    try:
         return res.json()
-    except Exception:
-        return None
+    except ValueError as exc:
+        raise UpstreamError(f"Last.fm returned invalid JSON: {exc}") from exc
 
 
 def _parse_tags(raw) -> list:
@@ -59,7 +67,7 @@ async def fetch_track_tags(
         params["mbid"] = mbid
 
     track_data = await _lf_fetch(params, api_key)
-    track_tags = _parse_tags(track_data.get("toptags", {}).get("tag") if track_data else None)
+    track_tags = _parse_tags(track_data.get("toptags", {}).get("tag"))
     if track_tags:
         return track_tags
 
@@ -67,9 +75,7 @@ async def fetch_track_tags(
         {"method": "artist.getTopTags", "artist": artist, "autocorrect": "1"},
         api_key,
     )
-    return _parse_tags(
-        artist_data.get("toptags", {}).get("tag") if artist_data else None
-    )
+    return _parse_tags(artist_data.get("toptags", {}).get("tag"))
 
 
 async def fetch_track_tags_only(
@@ -84,7 +90,7 @@ async def fetch_track_tags_only(
     if mbid:
         params["mbid"] = mbid
     data = await _lf_fetch(params, api_key)
-    return _parse_tags(data.get("toptags", {}).get("tag") if data else None)
+    return _parse_tags(data.get("toptags", {}).get("tag"))
 
 
 async def fetch_tag_artists(
@@ -99,7 +105,7 @@ async def fetch_tag_artists(
         },
         api_key,
     )
-    raw = data.get("topartists", {}).get("artist") if data else None
+    raw = data.get("topartists", {}).get("artist")
     if not raw:
         return []
     arr = raw if isinstance(raw, list) else [raw]
@@ -119,11 +125,7 @@ async def search_track(
         {"method": "track.search", "track": query, "limit": str(limit)},
         api_key,
     )
-    raw = (
-        data.get("results", {}).get("trackmatches", {}).get("track")
-        if data
-        else None
-    )
+    raw = data.get("results", {}).get("trackmatches", {}).get("track")
     if not raw:
         return []
     arr = raw if isinstance(raw, list) else [raw]
@@ -151,7 +153,7 @@ async def fetch_artist_top_tracks(
         },
         api_key,
     )
-    raw = data.get("toptracks", {}).get("track") if data else None
+    raw = data.get("toptracks", {}).get("track")
     if not raw:
         return []
     return raw if isinstance(raw, list) else [raw]

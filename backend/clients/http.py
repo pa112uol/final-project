@@ -3,6 +3,13 @@ import httpx
 
 USER_AGENT = "NextTrack/1.0 (https://github.com/nexttrack)"
 
+
+# Raised when an upstream call fails, so callers can tell a transient failure
+# apart from an empty result rather than both reading as falsy
+class UpstreamError(Exception):
+    pass
+
+
 # One httpx.AsyncClient per named service, scoped to the running event loop.
 # When the loop changes (a new asyncio.run() in tests) all clients are
 # discarded and recreated so connections are never shared across loops.
@@ -23,3 +30,14 @@ def get_client(name: str, **kwargs) -> httpx.AsyncClient:
         kwargs.setdefault("headers", {"User-Agent": USER_AGENT})
         _clients[name] = httpx.AsyncClient(**kwargs)
     return _clients[name]
+
+
+# Closes every client created on the running loop. Called from the app
+# lifespan on shutdown so connections are not left open past process exit
+async def close_clients() -> None:
+    global _clients, _current_loop
+    clients = list(_clients.values())
+    _clients = {}
+    _current_loop = None
+    for client in clients:
+        await client.aclose()

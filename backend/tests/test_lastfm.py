@@ -1,6 +1,9 @@
+import httpx
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from clients.http import UpstreamError
 from clients.lastfm import (
+    _lf_fetch,
     _parse_tags,
     fetch_track_tags,
     fetch_track_tags_only,
@@ -63,6 +66,37 @@ class TestParseTags:
         assert result[0]["name"] == "metal"
 
 
+class TestLfFetch:
+    async def test_returns_the_parsed_body_on_success(self):
+        client = make_client({"toptags": {"tag": []}})
+        with patch("clients.lastfm.get_client", return_value=client):
+            result = await _lf_fetch({"method": "track.getTopTags"}, "key")
+        assert result == {"toptags": {"tag": []}}
+
+    async def test_raises_upstream_error_on_non_success_status(self):
+        client = make_client(success=False)
+        with patch("clients.lastfm.get_client", return_value=client):
+            with pytest.raises(UpstreamError):
+                await _lf_fetch({"method": "track.getTopTags"}, "key")
+
+    async def test_raises_upstream_error_on_network_failure(self):
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=httpx.ConnectTimeout("timed out"))
+        with patch("clients.lastfm.get_client", return_value=client):
+            with pytest.raises(UpstreamError):
+                await _lf_fetch({"method": "track.getTopTags"}, "key")
+
+    async def test_raises_upstream_error_on_malformed_json(self):
+        resp = MagicMock()
+        resp.is_success = True
+        resp.json.side_effect = ValueError("not json")
+        client = MagicMock()
+        client.get = AsyncMock(return_value=resp)
+        with patch("clients.lastfm.get_client", return_value=client):
+            with pytest.raises(UpstreamError):
+                await _lf_fetch({"method": "track.getTopTags"}, "key")
+
+
 class TestFetchTrackTags:
     async def test_returns_track_tags_when_available(self):
         client = make_client({"toptags": {"tag": [{"name": "Rock", "count": "50"}]}})
@@ -87,11 +121,11 @@ class TestFetchTrackTags:
             result = await fetch_track_tags("Creep", "Radiohead", "key123")
         assert result == [{"name": "alternative", "count": 20}]
 
-    async def test_returns_empty_on_http_failure(self):
+    async def test_raises_upstream_error_on_http_failure(self):
         client = make_client(success=False)
         with patch("clients.lastfm.get_client", return_value=client):
-            result = await fetch_track_tags("Song", "Artist", "key")
-        assert result == []
+            with pytest.raises(UpstreamError):
+                await fetch_track_tags("Song", "Artist", "key")
 
     async def test_includes_mbid_in_params_when_provided(self):
         client = make_client({"toptags": {"tag": [{"name": "rock", "count": "5"}]}})
@@ -115,11 +149,11 @@ class TestFetchTrackTagsOnly:
             result = await fetch_track_tags_only("Song", "Artist", "key")
         assert result == [{"name": "pop", "count": 8}]
 
-    async def test_returns_empty_on_http_failure(self):
+    async def test_raises_upstream_error_on_http_failure(self):
         client = make_client(success=False)
         with patch("clients.lastfm.get_client", return_value=client):
-            result = await fetch_track_tags_only("Song", "Artist", "key")
-        assert result == []
+            with pytest.raises(UpstreamError):
+                await fetch_track_tags_only("Song", "Artist", "key")
 
     async def test_does_not_fall_back_to_artist_tags(self):
         client = make_client({"toptags": {"tag": []}})
@@ -161,11 +195,11 @@ class TestFetchTagArtists:
             result = await fetch_tag_artists("rock", 1, 10, "key")
         assert result == []
 
-    async def test_returns_empty_on_http_failure(self):
+    async def test_raises_upstream_error_on_http_failure(self):
         client = make_client(success=False)
         with patch("clients.lastfm.get_client", return_value=client):
-            result = await fetch_tag_artists("rock", 1, 10, "key")
-        assert result == []
+            with pytest.raises(UpstreamError):
+                await fetch_tag_artists("rock", 1, 10, "key")
 
     async def test_returns_empty_when_no_topartists_key(self):
         client = make_client({})
@@ -189,11 +223,11 @@ class TestFetchArtistTopTracks:
             result = await fetch_artist_top_tracks("Radiohead", 1, "key")
         assert result == [track]
 
-    async def test_returns_empty_on_http_failure(self):
+    async def test_raises_upstream_error_on_http_failure(self):
         client = make_client(success=False)
         with patch("clients.lastfm.get_client", return_value=client):
-            result = await fetch_artist_top_tracks("Artist", 5, "key")
-        assert result == []
+            with pytest.raises(UpstreamError):
+                await fetch_artist_top_tracks("Artist", 5, "key")
 
     async def test_returns_empty_when_no_tracks_key(self):
         client = make_client({})

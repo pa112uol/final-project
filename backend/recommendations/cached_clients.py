@@ -3,6 +3,8 @@
 import logging
 from types import SimpleNamespace
 
+from clients.http import UpstreamError
+
 from caching.async_cache import get_async_cache
 from caching.config import (
     NEGATIVE_TTL_S,
@@ -50,18 +52,21 @@ def _unwrap(entry: object) -> object:
     return _MISS
 
 
-# Runs the read-through, return the cached value if present, otherwise call the
-# real client and store what comes back. is_positive decides which TTL the
-# result earns, for the clients whose "found nothing" is not simply falsy
+# Runs the read-through: cached value if present, otherwise the real client.
+# A transient UpstreamError is served as `default` but never cached
 async def _read_through(
-    namespace: str, key_parts: list, ttl: int, fetch, is_positive=bool
+    namespace: str, key_parts: list, ttl: int, fetch, is_positive=bool, default=None
 ):
     cache = get_async_cache()
     key = build_key(namespace, *key_parts)
     cached = _unwrap(await cache.get_json(key))
     if cached is not _MISS:
         return cached
-    value = await fetch()
+    try:
+        value = await fetch()
+    except UpstreamError as exc:
+        logger.warning("[cache] upstream fetch failed for %s: %s", key, exc)
+        return default
     stored_ttl = ttl if is_positive(value) else NEGATIVE_TTL_S
     await cache.set_json(key, _wrap(value), stored_ttl)
     return value
@@ -74,6 +79,7 @@ def _cached_fetch_tag_artists(inner):
             [tag, page, limit],
             TTL_TAG_ARTISTS,
             lambda: inner(tag, page, limit, api_key),
+            default=[],
         )
 
     return fetch_tag_artists
@@ -86,6 +92,7 @@ def _cached_fetch_track_tags(inner):
             [title, artist, mbid],
             TTL_TRACK_TAGS,
             lambda: inner(title, artist, api_key, mbid),
+            default=[],
         )
 
     return fetch_track_tags
@@ -98,6 +105,7 @@ def _cached_fetch_track_tags_only(inner):
             [title, artist, mbid],
             TTL_TRACK_TAGS,
             lambda: inner(title, artist, api_key, mbid),
+            default=[],
         )
 
     return fetch_track_tags_only
@@ -124,6 +132,7 @@ def _cached_fetch_top_recordings_for_artist(inner):
             [artist_mbid, artist_name, limit],
             TTL_TOP_RECORDINGS,
             lambda: inner(artist_mbid, artist_name, limit, api_key),
+            default=[],
         )
 
     return fetch_top_recordings_for_artist

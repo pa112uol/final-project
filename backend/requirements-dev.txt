@@ -1,6 +1,7 @@
 -r requirements.txt
 
 fakeredis==2.37.0
+gunicorn==26.0.0
 iniconfig==2.3.0
 lupa==2.8
 packaging==26.2
@@ -8,5 +9,9 @@ pluggy==1.6.0
 Pygments==2.20.0
 pytest==9.1.0
 pytest-asyncio==1.4.0
-pytest-django==4.12.0
 sortedcontainers==2.4.0
+waitress==3.0.2
+
+# gunicorn is Linux-only (no fcntl on Windows); it installs on Windows but
+# only runs inside Docker. waitress is the Windows-local stand-in used by
+# the bench harness for a fair comparison baseline (see bench/RESULTS.md)

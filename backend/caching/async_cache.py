@@ -4,12 +4,14 @@
 import asyncio
 import logging
 import threading
+import uuid
 
 from redis import RedisError
 from redis import asyncio as aioredis
 
 from .base import BaseCache
 from .config import CONNECT_TIMEOUT_S, SOCKET_TIMEOUT_S, redis_url
+from .lock_script import RELEASE_LOCK_SCRIPT
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +143,31 @@ class AsyncRedisCache(BaseCache):
         except RedisError as exc:
             self._on_failure(exc)
             return False
+
+    # Acquires a short-lived distributed lock, mirroring SyncRedisCache.
+    # Returns an ownership token, or None when another worker holds it
+    async def acquire_lock(self, key: str, ttl: int) -> str | None:
+        if not self._available():
+            return None
+        token = uuid.uuid4().hex
+        try:
+            acquired = await self._get_client().set(key, token, nx=True, ex=ttl)
+            self._on_success()
+            return token if acquired else None
+        except RedisError as exc:
+            self._on_failure(exc)
+            return None
+
+    # Releases a lock acquired with acquire_lock. A stale token is a no-op,
+    # so it cannot release a successor's lock
+    async def release_lock(self, key: str, token: str | None) -> None:
+        if not token or not self._available():
+            return
+        try:
+            await self._get_client().eval(RELEASE_LOCK_SCRIPT, 1, key, token)
+            self._on_success()
+        except RedisError as exc:
+            self._on_failure(exc)
 
     # Runs a Lua script server-side. Exposed for the rate limiter.
     # Returns None when Redis is unavailable so the caller can

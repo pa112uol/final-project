@@ -14,7 +14,7 @@ if (-not (Test-Path $Python)) {
 $backendJob = Start-Job -Name Backend -ScriptBlock {
     param($dir, $py)
     Set-Location $dir
-    & $py manage.py runserver
+    & $py -m uvicorn app.main:app --reload --port 8000
 } -ArgumentList $BackendDir, $Python
 
 $frontendJob = Start-Job -Name Frontend -ScriptBlock {

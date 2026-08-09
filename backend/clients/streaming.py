@@ -10,9 +10,10 @@ YOUTUBE_SEARCH_BASE = "https://www.googleapis.com/youtube/v3/search"
 
 logger = logging.getLogger(__name__)
 
+# See clients/lastfm.py: raised past the request-level ceiling this used to be
 _CLIENT = dict(
     timeout=10,
-    limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+    limits=httpx.Limits(max_connections=60, max_keepalive_connections=30),
 )
 
 _ARTWORK_SIZES = {"small": 100, "medium": 300, "large": 600}

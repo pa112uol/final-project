@@ -1,9 +1,4 @@
-import sys
-import os
 from types import SimpleNamespace
-
-# Allow importing clients from the parent directory
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from .cached_clients import wrap_clients
 from .pipeline import run_pipeline
@@ -74,14 +69,22 @@ def _make_real_clients():
     )
 
 
+# Builds one wrapped client namespace. Meant to be built once at process
+# startup and passed in as `clients`, rather than rebuilt on every request
+def build_clients() -> Clients:
+    return wrap_clients(_make_real_clients())
+
+
 async def get_recommendations(
     seeds: list,
     api_key: str,
     mood=None,
     novelty: float = 0,
     exclude_seed_artists: bool = True,
+    clients: Clients | None = None,
 ) -> list:
-    clients = wrap_clients(_make_real_clients())
+    if clients is None:
+        clients = build_clients()
     return await run_pipeline(
         seeds,
         api_key,
@@ -94,14 +97,18 @@ async def get_recommendations(
 
 # Resolves one recording's canonical MusicBrainz data on demand, for the lazy
 # per-track endpoint. Shares cache entries with the pipeline's own resolution
-async def resolve_recording(mbid: str, title: str, artist: str) -> dict:
-    clients = wrap_clients(_make_real_clients())
+async def resolve_recording(
+    mbid: str, title: str, artist: str, clients: Clients | None = None
+) -> dict:
+    if clients is None:
+        clients = build_clients()
     return await clients.resolve_recording_mbid(mbid, title, artist)
 
 
 __all__ = [
     "get_recommendations",
     "resolve_recording",
+    "build_clients",
     "MOOD_TAGS",
     "Seed",
     "Track",

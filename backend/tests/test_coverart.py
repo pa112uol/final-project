@@ -1,138 +1,142 @@
-import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from django.test import RequestFactory
-import api.views as views
-from api.views import coverart
+
+from app.routers.coverart import COVERART_NAMESPACE, COVERART_NEGATIVE_TTL_S
 from caching.config import TTL_COVERART
+from caching.keys import build_key
+from caching.local import get_async_view_cache
 from clients.coverart import _release_mbids_for_recording, fetch_cover_art_url
 
 # The cache_disabled fixture in conftest.py hands every test a fresh cache, so
 # no per-test clearing is needed here any more.
 
 
-@pytest.fixture
-def rf():
-    return RequestFactory()
-
-
 def _coverart_key(mbid: str) -> str:
-    return views.build_key(views.COVERART_NAMESPACE, mbid)
+    return build_key(COVERART_NAMESPACE, mbid)
 
 
-def test_missing_mbid_returns_400(rf):
-    response = coverart(rf.get("/api/coverart/"))
+async def test_missing_mbid_returns_400(api_client):
+    response = await api_client.get("/api/coverart/")
     assert response.status_code == 400
 
 
-def test_returns_url_when_art_found(rf):
+async def test_returns_url_when_art_found(api_client):
     expected = "https://archive.org/download/mbid-abc/mbid-abc-500.jpg"
     with patch(
         "clients.coverart.fetch_cover_art_url",
         new=AsyncMock(return_value=expected),
     ):
-        response = coverart(rf.get("/api/coverart/", {"mbid": "abc-123"}))
+        response = await api_client.get(
+            "/api/coverart/", params={"mbid": "abc-123"}
+        )
     assert response.status_code == 200
-    assert json.loads(response.content)["url"] == expected
+    assert response.json()["url"] == expected
 
 
-def test_returns_404_when_no_art(rf):
+async def test_returns_404_when_no_art(api_client):
     with patch(
         "clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)
     ):
-        response = coverart(rf.get("/api/coverart/", {"mbid": "no-art-456"}))
+        response = await api_client.get(
+            "/api/coverart/", params={"mbid": "no-art-456"}
+        )
     assert response.status_code == 404
 
 
-def test_found_url_is_cached_without_re_fetching(rf):
+async def test_found_url_is_cached_without_re_fetching(api_client):
     mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
     with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
-        coverart(rf.get("/api/coverart/", {"mbid": "cached-mbid"}))
-        coverart(rf.get("/api/coverart/", {"mbid": "cached-mbid"}))
+        await api_client.get("/api/coverart/", params={"mbid": "cached-mbid"})
+        await api_client.get("/api/coverart/", params={"mbid": "cached-mbid"})
     assert mock_fetch.call_count == 1
 
 
-def test_negative_result_is_not_cached_forever(rf):
+async def test_negative_result_is_not_cached_forever(api_client):
     with patch(
         "clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)
     ):
-        coverart(rf.get("/api/coverart/", {"mbid": "flaky-mbid"}))
+        await api_client.get("/api/coverart/", params={"mbid": "flaky-mbid"})
 
     # Simulate the negative cache entry's TTL having elapsed
-    views.get_view_cache().delete(_coverart_key("flaky-mbid"))
+    await get_async_view_cache().delete(_coverart_key("flaky-mbid"))
 
     with patch(
         "clients.coverart.fetch_cover_art_url",
         new=AsyncMock(return_value="https://example.com/recovered.jpg"),
     ):
-        response = coverart(rf.get("/api/coverart/", {"mbid": "flaky-mbid"}))
+        response = await api_client.get(
+            "/api/coverart/", params={"mbid": "flaky-mbid"}
+        )
     assert response.status_code == 200
-    assert (
-        json.loads(response.content)["url"]
-        == "https://example.com/recovered.jpg"
-    )
+    assert response.json()["url"] == "https://example.com/recovered.jpg"
 
 
-def test_missing_cover_gets_the_short_negative_ttl(rf, sync_cache_enabled):
+async def test_missing_cover_gets_the_short_negative_ttl(
+    api_client, async_view_cache_enabled
+):
     with patch(
         "clients.coverart.fetch_cover_art_url", new=AsyncMock(return_value=None)
     ):
-        coverart(rf.get("/api/coverart/", {"mbid": "no-art-ttl"}))
+        await api_client.get("/api/coverart/", params={"mbid": "no-art-ttl"})
 
-    ttl = _redis_ttl(sync_cache_enabled, _coverart_key("no-art-ttl"))
-    assert 0 < ttl <= views.COVERART_NEGATIVE_TTL_S
+    ttl = await _redis_ttl(async_view_cache_enabled, _coverart_key("no-art-ttl"))
+    assert 0 < ttl <= COVERART_NEGATIVE_TTL_S
 
 
-def test_found_cover_gets_the_long_positive_ttl(rf, sync_cache_enabled):
+async def test_found_cover_gets_the_long_positive_ttl(
+    api_client, async_view_cache_enabled
+):
     with patch(
         "clients.coverart.fetch_cover_art_url",
         new=AsyncMock(return_value="https://example.com/art.jpg"),
     ):
-        coverart(rf.get("/api/coverart/", {"mbid": "has-art-ttl"}))
+        await api_client.get("/api/coverart/", params={"mbid": "has-art-ttl"})
 
-    ttl = _redis_ttl(sync_cache_enabled, _coverart_key("has-art-ttl"))
-    assert ttl > views.COVERART_NEGATIVE_TTL_S
+    ttl = await _redis_ttl(async_view_cache_enabled, _coverart_key("has-art-ttl"))
+    assert ttl > COVERART_NEGATIVE_TTL_S
     assert ttl <= TTL_COVERART
 
 
-def _redis_ttl(view_cache, key: str) -> int:
-    return view_cache._primary._get_client().ttl(key)
+async def _redis_ttl(view_cache, key: str) -> int:
+    return await view_cache._primary._get_client().ttl(key)
 
 
-def test_negative_result_within_ttl_is_not_re_fetched(rf):
+async def test_negative_result_within_ttl_is_not_re_fetched(api_client):
     mock_fetch = AsyncMock(return_value=None)
     with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
-        coverart(rf.get("/api/coverart/", {"mbid": "no-art-789"}))
-        coverart(rf.get("/api/coverart/", {"mbid": "no-art-789"}))
+        await api_client.get("/api/coverart/", params={"mbid": "no-art-789"})
+        await api_client.get("/api/coverart/", params={"mbid": "no-art-789"})
     assert mock_fetch.call_count == 1
 
 
-def test_passes_release_mbid_through_when_given(rf):
+async def test_passes_release_mbid_through_when_given(api_client):
     mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
     with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
-        coverart(
-            rf.get(
-                "/api/coverart/",
-                {"mbid": "rec-1", "releaseMbid": "release-1"},
-            )
+        await api_client.get(
+            "/api/coverart/",
+            params={"mbid": "rec-1", "releaseMbid": "release-1"},
         )
     mock_fetch.assert_awaited_once_with("rec-1", "release-1")
 
 
-def test_blank_release_mbid_is_treated_as_absent(rf):
+async def test_blank_release_mbid_is_treated_as_absent(api_client):
     mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
     with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
-        coverart(
-            rf.get("/api/coverart/", {"mbid": "rec-1", "releaseMbid": "  "})
+        await api_client.get(
+            "/api/coverart/", params={"mbid": "rec-1", "releaseMbid": "  "}
         )
     mock_fetch.assert_awaited_once_with("rec-1", None)
 
 
-def test_missing_release_mbid_is_treated_as_absent(rf):
+async def test_missing_release_mbid_is_treated_as_absent(api_client):
     mock_fetch = AsyncMock(return_value="https://example.com/art.jpg")
     with patch("clients.coverart.fetch_cover_art_url", new=mock_fetch):
-        coverart(rf.get("/api/coverart/", {"mbid": "rec-1"}))
+        await api_client.get("/api/coverart/", params={"mbid": "rec-1"})
     mock_fetch.assert_awaited_once_with("rec-1", None)
+
+
+async def test_post_returns_405(api_client):
+    response = await api_client.post("/api/coverart/")
+    assert response.status_code == 405
 
 
 def _mb_response(status_code, releases=None):

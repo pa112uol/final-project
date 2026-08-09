@@ -47,16 +47,10 @@ CONNECT_TIMEOUT_S = 2
 SOCKET_TIMEOUT_S = 2
 
 
-# Reads a setting from Django when it is configured, falling back to the raw
-# environment
+# Reads a setting from the environment. app/config.py loads the project's
+# dotenv files before anything else runs, so os.environ is the single
+# source of truth here
 def _get_setting(name: str, default: str) -> str:
-    try:
-        from django.conf import settings
-
-        if settings.configured:
-            return getattr(settings, name, os.environ.get(name, default))
-    except ImportError:
-        pass
     return os.environ.get(name, default)
 
 

@@ -10,6 +10,7 @@ from caching.config import (
     TTL_STREAMING_LINKS,
 )
 from caching.keys import build_key
+from clients.http import UpstreamError
 from recommendations.cached_clients import (
     NS_ARTIST_MBID,
     NS_ARTIST_POPULARITY,
@@ -468,6 +469,58 @@ class TestArtistPopularity:
         assert clients.fetch_artist_popularity.call_args.args[0] == ["a-1"]
 
 
+# Methods whose inner client can raise UpstreamError
+# (Last.fm) and so are wired with a default=[] fallback in cached_clients.py
+UPSTREAM_ERROR_METHODS = [
+    "fetch_tag_artists",
+    "fetch_track_tags",
+    "fetch_track_tags_only",
+    "fetch_top_recordings_for_artist",
+]
+
+
+class TestUpstreamFailureIsNotCached:
+    @pytest.mark.parametrize("method", UPSTREAM_ERROR_METHODS)
+    async def test_transient_failure_returns_the_default_instead_of_raising(
+        self, async_cache_enabled, method
+    ):
+        args, kwargs = CALLS[method]
+        clients = SimpleNamespace(
+            **{method: AsyncMock(side_effect=UpstreamError("HTTP 429"))}
+        )
+        result = await getattr(wrap_clients(clients), method)(*args, **kwargs)
+        assert result == []
+
+    @pytest.mark.parametrize("method", UPSTREAM_ERROR_METHODS)
+    async def test_transient_failure_is_not_written_to_the_cache(
+        self, async_cache_enabled, method
+    ):
+        args, kwargs = CALLS[method]
+        clients = SimpleNamespace(
+            **{method: AsyncMock(side_effect=UpstreamError("HTTP 429"))}
+        )
+        cached = wrap_clients(clients)
+
+        await getattr(cached, method)(*args, **kwargs)
+        getattr(clients, method).side_effect = None
+        getattr(clients, method).return_value = [{"name": "recovered"}]
+        result = await getattr(cached, method)(*args, **kwargs)
+
+        assert result == [{"name": "recovered"}]
+        assert getattr(clients, method).call_count == 2
+
+    @pytest.mark.parametrize("method", UPSTREAM_ERROR_METHODS)
+    async def test_a_non_upstream_exception_still_propagates(
+        self, async_cache_enabled, method
+    ):
+        args, kwargs = CALLS[method]
+        clients = SimpleNamespace(
+            **{method: AsyncMock(side_effect=ValueError("bug"))}
+        )
+        with pytest.raises(ValueError):
+            await getattr(wrap_clients(clients), method)(*args, **kwargs)
+
+
 class TestPipelineIntegration:
     @pytest.fixture
     def counting_clients(self):
@@ -541,4 +594,3 @@ class TestPipelineIntegration:
 
         tracks = await self._run(wrap_clients(make_clients()))
         assert len(tracks) > 0
-

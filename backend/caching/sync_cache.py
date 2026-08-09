@@ -1,4 +1,6 @@
-# Synchronous cache implementation, used by the Django views
+# Synchronous cache implementation. Superseded in request paths by
+# AsyncRedisCache/AsyncFallbackCache (caching/local.py), kept as a
+# general-purpose sync primitive for any non-async caller
 
 import uuid
 
@@ -6,13 +8,7 @@ import redis
 
 from .base import BaseCache
 from .config import CONNECT_TIMEOUT_S, SOCKET_TIMEOUT_S, redis_url
-
-_RELEASE_LOCK_SCRIPT = """
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-    return redis.call('DEL', KEYS[1])
-end
-return 0
-"""
+from .lock_script import RELEASE_LOCK_SCRIPT
 
 
 def _default_connect():
@@ -94,7 +90,7 @@ class SyncRedisCache(BaseCache):
         if not token or not self._available():
             return
         try:
-            self._get_client().eval(_RELEASE_LOCK_SCRIPT, 1, key, token)
+            self._get_client().eval(RELEASE_LOCK_SCRIPT, 1, key, token)
             self._on_success()
         except redis.RedisError as exc:
             self._on_failure(exc)

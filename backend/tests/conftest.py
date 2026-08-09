@@ -1,8 +1,14 @@
 import fakeredis
+import httpx
 import pytest
 
 from caching.async_cache import AsyncRedisCache, set_async_cache
-from caching.local import FallbackCache, set_view_cache
+from caching.local import (
+    AsyncFallbackCache,
+    FallbackCache,
+    set_async_view_cache,
+    set_view_cache,
+)
 from caching.sync_cache import SyncRedisCache, set_sync_cache
 
 
@@ -23,10 +29,16 @@ def cache_disabled():
     set_view_cache(
         FallbackCache(SyncRedisCache(connect=_unreachable, enabled=_disabled))
     )
+    set_async_view_cache(
+        AsyncFallbackCache(
+            AsyncRedisCache(connect=_unreachable, enabled=_disabled)
+        )
+    )
     yield
     set_sync_cache(None)
     set_async_cache(None)
     set_view_cache(None)
+    set_async_view_cache(None)
 
 
 # A disabled cache must never open a connection, so the factory raises rather
@@ -68,3 +80,33 @@ def async_cache_enabled(fake_redis):
     set_async_cache(cache)
     yield cache
     set_async_cache(None)
+
+
+# Swaps the async view cache onto fakeredis, for the async router tests
+@pytest.fixture
+def async_view_cache_enabled(fake_redis):
+    def connect():
+        return fakeredis.FakeAsyncRedis(
+            server=fake_redis, decode_responses=True
+        )
+
+    cache = AsyncRedisCache(connect=connect, enabled=_enabled)
+    view_cache = AsyncFallbackCache(cache)
+    set_async_view_cache(view_cache)
+    yield view_cache
+    set_async_view_cache(None)
+
+
+# httpx client wired directly to the FastAPI app over ASGI, replacing
+# Django's RequestFactory + direct view calls
+@pytest.fixture
+async def api_client():
+    from app.main import app
+
+    transport = httpx.ASGITransport(app=app)
+    # ASGITransport does not run the lifespan on its own so it is driven here
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://testserver"
+        ) as client:
+            yield client
