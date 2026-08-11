@@ -534,23 +534,21 @@ async def run_pipeline(
     }
     score_candidates_by_seed_tags(raw_candidates, normalized_tag_weights)
 
-    # Stage 3: Filter out seed tracks/artists and collapse duplicate recordings
+    # Cleaning: filter out seed tracks/artists, collapse duplicate recordings
     candidates = filter_and_deduplicate_candidates(
         raw_candidates, seeds, exclude_seed_artists
     )
 
-    # Stage 4: Enrich with track-level tags, then fall back to artist-level
-    # popularity for tracks ListenBrainz has no listen count for, and score
-    # candidates against the requested mood. Mood runs after enrichment because
-    # mood words usually arrive with the Last.fm track tags, not the LB ones
+    # Stage 3: Enrich with track-level tags, then artist-level popularity
     await enrich_candidates_with_lf_tags(
         candidates, clients, api_key, normalized_tag_weights, novelty
     )
     await apply_artist_popularity_fallback(candidates, clients)
+    # Mood is scored after enrichment, since mood tags usually arrive with
+    # the Last.fm track tags rather than the ListenBrainz ones
     apply_mood_scores(candidates, mood)
 
-    # Stage 5: Score by relevance/novelty, cap per-artist, floor by tag
-    # match then diversify the final selection via MMR
+    # Stage 4: Score by relevance/novelty, then cap per-artist
     with_mbid = [c for c in candidates if get_field(c, "mbid")]
     logger.info(
         "[pipeline:score] scoring %d candidates with mbid (dropped %d without mbid)",
@@ -560,8 +558,11 @@ async def run_pipeline(
 
     scored = score_and_sort(with_mbid, novelty)
     after_artist_cap = apply_artist_cap(scored, MAX_TRACKS_PER_ARTIST)
+
+    # Stage 5: Floor by tag match against the seed profile
     pre_mmr = apply_tag_floor(after_artist_cap, RECOMMENDATION_LIMIT)
 
+    # Stage 6: Diversify the final selection via MMR
     logger.info(
         "[pipeline:mmr] selecting %d from %d scored candidates",
         RECOMMENDATION_LIMIT,
