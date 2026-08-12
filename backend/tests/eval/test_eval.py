@@ -1,9 +1,3 @@
-"""
-Recommendation evaluation harness.
-
-Mirrors eval.test.ts: recall, MRR, leave-one-out stability, novelty effect, MMR diversity.
-Uses a fixed synthetic candidate pool so tests are deterministic and require no network calls.
-"""
 import pytest
 from recommendations.tags import (
     build_tag_weights,
@@ -80,9 +74,9 @@ def seed_match_counts(tracks: list, distinctive: list) -> list:
 def seed_coverage(tracks: list, distinctive: list) -> float:
     if not distinctive:
         return 0.0
-    return sum(1 for count in seed_match_counts(tracks, distinctive) if count) / len(
-        distinctive
-    )
+    return sum(
+        1 for count in seed_match_counts(tracks, distinctive) if count
+    ) / len(distinctive)
 
 
 # How evenly the results split across seeds: 1.0 when every seed is reflected by
@@ -101,19 +95,21 @@ def apply_track_tag_scores(candidates: list, tag_weights: dict) -> list:
     result = []
     for c in candidates:
         score = sum(nw.get(normalize_tag(t.lower()), 0) for t in c.tags)
-        result.append(Candidate(
-            title=c.title,
-            artist=c.artist,
-            artist_mbid=c.artist_mbid,
-            mbid=c.mbid,
-            duration_ms=c.duration_ms,
-            tag_weight_sum=c.tag_weight_sum,
-            track_tag_score=score,
-            listen_count=c.listen_count,
-            user_count=c.user_count,
-            artist_listen_count=c.artist_listen_count,
-            tags=c.tags,
-        ))
+        result.append(
+            Candidate(
+                title=c.title,
+                artist=c.artist,
+                artist_mbid=c.artist_mbid,
+                mbid=c.mbid,
+                duration_ms=c.duration_ms,
+                tag_weight_sum=c.tag_weight_sum,
+                track_tag_score=score,
+                listen_count=c.listen_count,
+                user_count=c.user_count,
+                artist_listen_count=c.artist_listen_count,
+                tags=c.tags,
+            )
+        )
     return result
 
 
@@ -134,13 +130,97 @@ SEED_TAG_SETS = [
 # Four genre matching candidates and three unrelated distractors.
 # tag_weight_sum represents expected artist coverage scores from build_candidates
 CANDIDATE_POOL = [
-    Candidate(title="Alison", artist="Slowdive", artist_mbid="a1", mbid="c1", duration_ms=300000, tag_weight_sum=150, track_tag_score=0, listen_count=50000, user_count=20000, artist_listen_count=0, tags=["shoegaze", "dreampop"]),
-    Candidate(title="When the Sun Hits", artist="Slowdive", artist_mbid="a1", mbid="c2", duration_ms=260000, tag_weight_sum=140, track_tag_score=0, listen_count=40000, user_count=15000, artist_listen_count=0, tags=["shoegaze", "noise pop"]),
-    Candidate(title="Vapour Trail", artist="Ride", artist_mbid="a2", mbid="c3", duration_ms=240000, tag_weight_sum=130, track_tag_score=0, listen_count=30000, user_count=10000, artist_listen_count=0, tags=["shoegaze", "dreampop"]),
-    Candidate(title="Heaven or Las Vegas", artist="Cocteau Twins", artist_mbid="a3", mbid="c4", duration_ms=280000, tag_weight_sum=120, track_tag_score=0, listen_count=25000, user_count=8000, artist_listen_count=0, tags=["dreampop", "shoegaze"]),
-    Candidate(title="GOAT", artist="Drake", artist_mbid="a10", mbid="d1", duration_ms=200000, tag_weight_sum=10, track_tag_score=0, listen_count=5000000, user_count=2000000, artist_listen_count=0, tags=["hip hop", "rap", "trap"]),
-    Candidate(title="Blinding Lights", artist="The Weeknd", artist_mbid="a11", mbid="d2", duration_ms=200000, tag_weight_sum=10, track_tag_score=0, listen_count=8000000, user_count=3000000, artist_listen_count=0, tags=["pop", "synth pop"]),
-    Candidate(title="Country Roads", artist="John Denver", artist_mbid="a12", mbid="d3", duration_ms=200000, tag_weight_sum=5, track_tag_score=0, listen_count=2000000, user_count=800000, artist_listen_count=0, tags=["country", "folk"]),
+    Candidate(
+        title="Alison",
+        artist="Slowdive",
+        artist_mbid="a1",
+        mbid="c1",
+        duration_ms=300000,
+        tag_weight_sum=150,
+        track_tag_score=0,
+        listen_count=50000,
+        user_count=20000,
+        artist_listen_count=0,
+        tags=["shoegaze", "dreampop"],
+    ),
+    Candidate(
+        title="When the Sun Hits",
+        artist="Slowdive",
+        artist_mbid="a1",
+        mbid="c2",
+        duration_ms=260000,
+        tag_weight_sum=140,
+        track_tag_score=0,
+        listen_count=40000,
+        user_count=15000,
+        artist_listen_count=0,
+        tags=["shoegaze", "noise pop"],
+    ),
+    Candidate(
+        title="Vapour Trail",
+        artist="Ride",
+        artist_mbid="a2",
+        mbid="c3",
+        duration_ms=240000,
+        tag_weight_sum=130,
+        track_tag_score=0,
+        listen_count=30000,
+        user_count=10000,
+        artist_listen_count=0,
+        tags=["shoegaze", "dreampop"],
+    ),
+    Candidate(
+        title="Heaven or Las Vegas",
+        artist="Cocteau Twins",
+        artist_mbid="a3",
+        mbid="c4",
+        duration_ms=280000,
+        tag_weight_sum=120,
+        track_tag_score=0,
+        listen_count=25000,
+        user_count=8000,
+        artist_listen_count=0,
+        tags=["dreampop", "shoegaze"],
+    ),
+    Candidate(
+        title="GOAT",
+        artist="Drake",
+        artist_mbid="a10",
+        mbid="d1",
+        duration_ms=200000,
+        tag_weight_sum=10,
+        track_tag_score=0,
+        listen_count=5000000,
+        user_count=2000000,
+        artist_listen_count=0,
+        tags=["hip hop", "rap", "trap"],
+    ),
+    Candidate(
+        title="Blinding Lights",
+        artist="The Weeknd",
+        artist_mbid="a11",
+        mbid="d2",
+        duration_ms=200000,
+        tag_weight_sum=10,
+        track_tag_score=0,
+        listen_count=8000000,
+        user_count=3000000,
+        artist_listen_count=0,
+        tags=["pop", "synth pop"],
+    ),
+    Candidate(
+        title="Country Roads",
+        artist="John Denver",
+        artist_mbid="a12",
+        mbid="d3",
+        duration_ms=200000,
+        tag_weight_sum=5,
+        track_tag_score=0,
+        listen_count=2000000,
+        user_count=800000,
+        artist_listen_count=0,
+        tags=["country", "folk"],
+    ),
 ]
 
 RELEVANT = {"c1", "c2", "c3", "c4"}
@@ -172,7 +252,9 @@ def make_cluster(prefix: str, tags: list, base_score: float, n: int) -> list:
 
 def ranked_pool(novelty: float) -> list:
     tag_weights = build_tag_weights(SEED_TAG_SETS)
-    return score_and_sort(apply_track_tag_scores(CANDIDATE_POOL, tag_weights), novelty)
+    return score_and_sort(
+        apply_track_tag_scores(CANDIDATE_POOL, tag_weights), novelty
+    )
 
 
 class TestRecallAndRanking:
@@ -194,32 +276,52 @@ class TestLeaveOneOutStability:
     def test_recall_at_4_remains_1_with_single_seed(self):
         # Simulates a user providing only a single seed rather than two
         tag_weights = build_tag_weights([SEED_TAG_SETS[1]])
-        ranked = score_and_sort(apply_track_tag_scores(CANDIDATE_POOL, tag_weights), 0)
+        ranked = score_and_sort(
+            apply_track_tag_scores(CANDIDATE_POOL, tag_weights), 0
+        )
         assert recall_at_k(ranked, RELEVANT, 4) == 1
 
 
 class TestNoveltyParameterEffect:
     POPULAR_RELEVANT = Candidate(
-        title="Popular Track", artist="Famous Band", artist_mbid="ap", mbid="pop",
-        duration_ms=None, tag_weight_sum=150, track_tag_score=0,
-        listen_count=10_000_000, user_count=5_000_000, artist_listen_count=0,
+        title="Popular Track",
+        artist="Famous Band",
+        artist_mbid="ap",
+        mbid="pop",
+        duration_ms=None,
+        tag_weight_sum=150,
+        track_tag_score=0,
+        listen_count=10_000_000,
+        user_count=5_000_000,
+        artist_listen_count=0,
         tags=["shoegaze", "dreampop"],
     )
     OBSCURE_RELEVANT = Candidate(
-        title="Obscure Track", artist="Unknown Band", artist_mbid="ao", mbid="obs",
-        duration_ms=None, tag_weight_sum=80, track_tag_score=0,
-        listen_count=500, user_count=200, artist_listen_count=0,
+        title="Obscure Track",
+        artist="Unknown Band",
+        artist_mbid="ao",
+        mbid="obs",
+        duration_ms=None,
+        tag_weight_sum=80,
+        track_tag_score=0,
+        listen_count=500,
+        user_count=200,
+        artist_listen_count=0,
         tags=["shoegaze", "dreampop"],
     )
 
     def test_novelty_0_popular_ranks_above_obscure(self):
         tag_weights = build_tag_weights(SEED_TAG_SETS)
-        pool = apply_track_tag_scores([self.POPULAR_RELEVANT, self.OBSCURE_RELEVANT], tag_weights)
+        pool = apply_track_tag_scores(
+            [self.POPULAR_RELEVANT, self.OBSCURE_RELEVANT], tag_weights
+        )
         assert score_and_sort(pool, 0)[0].mbid == "pop"
 
     def test_novelty_1_obscure_ranks_above_popular(self):
         tag_weights = build_tag_weights(SEED_TAG_SETS)
-        pool = apply_track_tag_scores([self.POPULAR_RELEVANT, self.OBSCURE_RELEVANT], tag_weights)
+        pool = apply_track_tag_scores(
+            [self.POPULAR_RELEVANT, self.OBSCURE_RELEVANT], tag_weights
+        )
         assert score_and_sort(pool, 1)[0].mbid == "obs"
 
 
@@ -227,7 +329,9 @@ class TestMmrDiversity:
     def test_mmr_produces_higher_intralist_diversity_than_greedy(self):
         cluster_a = make_cluster("A", ["shoegaze", "dreampop"], 0.9, 3)
         cluster_b = make_cluster("B", ["post punk", "gothic"], 0.75, 3)
-        ranked = sorted(cluster_a + cluster_b, key=lambda x: x.final_score, reverse=True)
+        ranked = sorted(
+            cluster_a + cluster_b, key=lambda x: x.final_score, reverse=True
+        )
         greedy_top3 = ranked[:3]
         mmr_top3 = mmr_select(ranked, 3)
         assert intralist_diversity(mmr_top3) > intralist_diversity(greedy_top3)
@@ -235,7 +339,9 @@ class TestMmrDiversity:
     def test_mmr_selects_highest_scoring_candidate_first(self):
         cluster_a = make_cluster("A", ["shoegaze", "dreampop"], 0.9, 3)
         cluster_b = make_cluster("B", ["post punk", "gothic"], 0.75, 3)
-        ranked = sorted(cluster_a + cluster_b, key=lambda x: x.final_score, reverse=True)
+        ranked = sorted(
+            cluster_a + cluster_b, key=lambda x: x.final_score, reverse=True
+        )
         assert mmr_select(ranked, 4)[0].mbid == "A1"
 
 
@@ -247,9 +353,17 @@ GRUNGE_SEED = [LFTag(name="rock", count=100), LFTag(name="grunge", count=40)]
 
 def make_track(artist: str, tags: list) -> ScoredCandidate:
     return ScoredCandidate(
-        title=f"{artist} song", artist=artist, artist_mbid="a", mbid=f"m-{artist}",
-        duration_ms=None, tag_weight_sum=1, track_tag_score=1, listen_count=1,
-        user_count=1, artist_listen_count=0, tags=tags,
+        title=f"{artist} song",
+        artist=artist,
+        artist_mbid="a",
+        mbid=f"m-{artist}",
+        duration_ms=None,
+        tag_weight_sum=1,
+        track_tag_score=1,
+        listen_count=1,
+        user_count=1,
+        artist_listen_count=0,
+        tags=tags,
     )
 
 
@@ -267,8 +381,14 @@ class TestDistinctiveTagsPerSeed:
     def test_ignores_long_tail_tags_outside_each_seed_top_n(self):
         # Only the strongest tags characterise a seed; rare tags no candidate
         # carries would otherwise dominate the "distinctive" set
-        seed_a = [LFTag(name="funk", count=90), LFTag(name="bristol sound", count=1)]
-        seed_b = [LFTag(name="grunge", count=90), LFTag(name="anxious", count=1)]
+        seed_a = [
+            LFTag(name="funk", count=90),
+            LFTag(name="bristol sound", count=1),
+        ]
+        seed_b = [
+            LFTag(name="grunge", count=90),
+            LFTag(name="anxious", count=1),
+        ]
         distinctive = distinctive_tags_per_seed([seed_a, seed_b], top_n=1)
         assert distinctive == [{"funk"}, {"grunge"}]
 
@@ -332,9 +452,16 @@ class TestSeedBalance:
 # the pool keeps this order, which is what makes the no-mood baseline 0
 def make_mood_candidate(mbid: str, third_tag: str) -> Candidate:
     return Candidate(
-        title=f"Track {mbid}", artist=f"Artist {mbid}", artist_mbid=f"a-{mbid}",
-        mbid=mbid, duration_ms=None, tag_weight_sum=100, track_tag_score=0,
-        listen_count=10000, user_count=5000, artist_listen_count=0,
+        title=f"Track {mbid}",
+        artist=f"Artist {mbid}",
+        artist_mbid=f"a-{mbid}",
+        mbid=mbid,
+        duration_ms=None,
+        tag_weight_sum=100,
+        track_tag_score=0,
+        listen_count=10000,
+        user_count=5000,
+        artist_listen_count=0,
         tags=["shoegaze", "dreampop", third_tag],
     )
 
@@ -347,6 +474,7 @@ MOOD_CANDIDATE_POOL = [
     make_mood_candidate("related-strong", "chillout"),
     make_mood_candidate("related-weak", "downtempo"),
 ]
+
 
 def mood_ranked_pool(mood, novelty: float = 0.0) -> list:
     tag_weights = build_tag_weights(SEED_TAG_SETS)
@@ -452,11 +580,20 @@ class TestMoodRankingQuality:
         # unrelated genre still loses to the on-genre pool
         tag_weights = build_tag_weights(SEED_TAG_SETS)
         intruder = Candidate(
-            title="Chill Rap", artist="Nobody", artist_mbid="a-x", mbid="off-genre",
-            duration_ms=None, tag_weight_sum=10, track_tag_score=0,
-            listen_count=10000, user_count=5000, artist_listen_count=0,
+            title="Chill Rap",
+            artist="Nobody",
+            artist_mbid="a-x",
+            mbid="off-genre",
+            duration_ms=None,
+            tag_weight_sum=10,
+            track_tag_score=0,
+            listen_count=10000,
+            user_count=5000,
+            artist_listen_count=0,
             tags=["hip hop", "trap", "chillout"],
         )
-        pool = apply_track_tag_scores(MOOD_CANDIDATE_POOL + [intruder], tag_weights)
+        pool = apply_track_tag_scores(
+            MOOD_CANDIDATE_POOL + [intruder], tag_weights
+        )
         apply_mood_scores(pool, "chill")
         assert score_and_sort(pool, 0)[0].mbid != "off-genre"
