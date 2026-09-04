@@ -31,10 +31,11 @@ frontend/build/
 # misc
 .DS_Store
 *.pem
-/docs
-/references
+docs
+references
 backend/demo
 backend/bench
+report
 
 # debug
 npm-debug.log*
