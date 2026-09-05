@@ -7,7 +7,7 @@ from recommendations.diversify import mmr_select
 from recommendations.pipeline import apply_artist_cap, apply_tag_floor
 from recommendations.constants import MAX_TRACKS_PER_ARTIST
 from recommendations.types import Candidate
-from backend.tests.eval.test_eval import (
+from tests.eval.test_eval import (
     SEED_TAG_SETS,
     apply_track_tag_scores,
     intralist_diversity,
