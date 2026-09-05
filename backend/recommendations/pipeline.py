@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # seed a share of the slots when the feature is enabled and there is more than
 # one seed
 def select_final_tracks(pre_mmr: list, seed_tag_sets: list, limit: int) -> list:
-    if env_flag("RECS_SEED_BALANCED") and len(seed_tag_sets) > 1:
+    if env_flag("RECS_SEED_BALANCED", True) and len(seed_tag_sets) > 1:
         distinctive = distinctive_tags_per_seed(seed_tag_sets)
 
         def seed_ids_of(candidate):

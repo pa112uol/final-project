@@ -18,6 +18,6 @@ def set_field(obj, key, value):
 # in the pipeline accepts the same set of truthy strings
 def env_flag(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
-    if raw is None:
+    if raw is None or not raw.strip():
         return default
     return raw.strip().lower() in ("1", "true", "yes")

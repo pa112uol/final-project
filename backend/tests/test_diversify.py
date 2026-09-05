@@ -9,7 +9,8 @@ from recommendations.constants import (
     SELECTION_FOR_VARIETY,
     SELECTION_TOP_MATCH,
 )
-from recommendations.types import ScoredCandidate
+from recommendations.types import ScoredCandidate, LFTag
+from recommendations.pipeline import select_final_tracks
 
 
 def make_scored_candidate(**kwargs):
@@ -377,3 +378,56 @@ class TestMmrSelectBalanced:
 
     def test_returns_empty_for_empty_input(self):
         assert mmr_select_balanced([], 5, lambda c: set(), 2) == []
+
+
+# The following tests verify that the RECS_SEED_BALANCED environment variable
+# is read consistently across the pipeline and that its presence or absence affects
+# the final selection of tracks as expected
+class TestSelectFinalTracksDispatch:
+    def _skewed_pool(self):
+        return [
+            make_scored_candidate(
+                mbid=f"a{i}",
+                artist=f"A{i}",
+                final_score=0.9 - i * 0.05,
+                tags=["funk"],
+            )
+            for i in range(3)
+        ] + [
+            make_scored_candidate(
+                mbid="b0", artist="B", final_score=0.2, tags=["grunge"]
+            )
+        ]
+
+    def _seed_tag_sets(self):
+        return [
+            [LFTag(name="funk", count=100)],
+            [LFTag(name="grunge", count=100)],
+        ]
+
+    def test_multi_seed_requests_balance_by_default(self, monkeypatch):
+        monkeypatch.delenv("RECS_SEED_BALANCED", raising=False)
+        result = select_final_tracks(
+            self._skewed_pool(), self._seed_tag_sets(), 2
+        )
+        assert {c.mbid for c in result} == {"a0", "b0"}
+
+    def test_a_blank_setting_is_treated_as_unset_not_as_off(self, monkeypatch):
+        monkeypatch.setenv("RECS_SEED_BALANCED", "")
+        result = select_final_tracks(
+            self._skewed_pool(), self._seed_tag_sets(), 2
+        )
+        assert {c.mbid for c in result} == {"a0", "b0"}
+
+    def test_the_flag_can_still_opt_out_to_plain_mmr(self, monkeypatch):
+        monkeypatch.setenv("RECS_SEED_BALANCED", "false")
+        result = select_final_tracks(
+            self._skewed_pool(), self._seed_tag_sets(), 2
+        )
+        assert "b0" not in {c.mbid for c in result}
+
+    def test_a_single_seed_never_takes_the_balanced_path(self, monkeypatch):
+        monkeypatch.delenv("RECS_SEED_BALANCED", raising=False)
+        pool = self._skewed_pool()
+        result = select_final_tracks(pool, [[LFTag(name="funk", count=100)]], 2)
+        assert result == mmr_select(pool, 2)
