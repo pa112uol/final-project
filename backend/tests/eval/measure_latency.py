@@ -151,6 +151,7 @@ def main() -> None:
             label="warm-concurrent",
         )
     )
+    hits_conc, misses_conc = cache_counters(conn)
 
     out = {
         "probe_track_count": track_count,
@@ -164,6 +165,10 @@ def main() -> None:
         "warm_pass_cache": {
             "hits": hits_warm - hits_cold,
             "misses": misses_warm - misses_cold,
+        },
+        "warm_concurrent_pass_cache": {
+            "hits": hits_conc - hits_warm,
+            "misses": misses_conc - misses_warm,
         },
         "keys_in_cache": conn.dbsize(),
     }
