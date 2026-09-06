@@ -400,9 +400,18 @@ async def apply_artist_popularity_fallback(candidates: list, clients) -> None:
         for c in candidates
         if get_field(c, "listen_count") == 0 and get_field(c, "artist_mbid")
     ]
-    lb_artist_popularity = await clients.fetch_artist_popularity(
-        list(set(artist_mbids))
-    )
+    try:
+        lb_artist_popularity = await clients.fetch_artist_popularity(
+            list(set(artist_mbids))
+        )
+    except Exception as exc:
+        # Every other stage degrades rather than failing the request, and this
+        # one can too... without artist counts the affected candidates keep
+        # artist_listen_count 0 and scoring gives them the median obscurity
+        logger.warning(
+            "[pipeline:popularity] fetch_artist_popularity failed: %s", exc
+        )
+        return
     for c in candidates:
         if get_field(c, "listen_count") == 0:
             count = lb_artist_popularity.get(get_field(c, "artist_mbid"))

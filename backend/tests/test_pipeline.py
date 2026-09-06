@@ -387,6 +387,18 @@ class TestRunPipeline:
         await run_pipeline([TEST_SEED], "fake-api-key", None, 1, clients)
         assert len(calls) > 0
 
+    async def test_still_returns_tracks_when_artist_popularity_fails(self):
+        async def fetch_artist_popularity(mbids):
+            raise RuntimeError("ListenBrainz down")
+
+        clients = make_clients()
+        clients.fetch_artist_popularity = fetch_artist_popularity
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 1, clients
+        )
+        assert tracks
+        assert all(0 <= t.novelty_score <= 1 for t in tracks)
+
     async def test_excludes_all_tracks_by_seed_artist_by_default(self):
         tracks = await run_pipeline(
             [TEST_SEED], "fake-api-key", None, 0, make_clients()
