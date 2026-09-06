@@ -18,6 +18,10 @@ def median(values: list) -> float:
     return (s[mid - 1] + s[mid]) / 2
 
 
+# Popularity read as a long-tail novelty signal follows Celma and Herrera (2008)
+# https://doi.org/10.1145/1454008.1454038
+# The log transform is this project's own implementation of the heavy-tailed
+# distribution they model.
 # Obscurity from a listen count, normalized on a log scale against the max.
 # Log scale is essential: listen counts are power-law distributed, so linear
 # normalization lets one mega-popular track flatten everything else to ~1

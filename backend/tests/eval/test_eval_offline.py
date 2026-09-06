@@ -115,6 +115,8 @@ RELEVANT = {c.mbid for c in CATALOGUE if c.mbid.startswith("g")}
 TOTAL_LISTENS = sum(c.listen_count for c in CATALOGUE)
 
 
+# Discounted cumulative gain, Jarvelin and Kekalainen (2002)
+# https://doi.org/10.1145/582415.582418
 def dcg(gains: list) -> float:
     return sum(g / math.log2(i + 2) for i, g in enumerate(gains))
 
@@ -127,6 +129,8 @@ def ndcg_at_k(ranked: list, relevant: set, k: int) -> float:
     return dcg(gains) / dcg(ideal)
 
 
+# Mean self-information novelty, Vargas and Castells (2011)
+# https://doi.org/10.1145/2043932.2043955
 def mean_self_information_at_k(
     ranked: list, total_listens: int, k: int
 ) -> float:

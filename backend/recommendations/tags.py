@@ -209,6 +209,9 @@ def merge_tags(lb_tags: list, lf_tags: list) -> list:
 
 
 # Compute tag weights for a set of seed tags, using TF-IDF style weighting
+# Adapts TF-IDF term weighting, Salton and Buckley (1988), with the document
+# frequency factor inverted so a tag shared across seeds counts as consensus
+# https://doi.org/10.1016/0306-4573(88)90021-0
 def build_tag_weights(seed_tag_sets: list) -> dict:
     total_seeds = max(len(seed_tag_sets), 1)
     tag_tf = {}

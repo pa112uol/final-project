@@ -11,7 +11,9 @@ LB_CONCURRENCY = 5
 
 
 # Artists ranked higher in tag.getTopArtists are stronger genre representatives.
-# An NDCG style log discount weights rank 1 at 1.0 and rank 30 at 0.20
+# An NDCG style log discount weights rank 1 at 0.63 and rank 30 at 0.20
+# Discount taken from DCG, Jarvelin and Kekalainen (2002)
+# https://doi.org/10.1145/582415.582418
 def _rank_decay(rank: int) -> float:
     return 1 / math.log2(rank + 2)
 

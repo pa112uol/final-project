@@ -16,6 +16,8 @@ def tokenize(tags: list) -> set:
     return tokens
 
 
+# Jaccard coefficient, Jaccard (1912)
+# https://doi.org/10.1111/j.1469-8137.1912.tb05611.x
 def jaccard_sets(a: set, b: set) -> float:
     if not a or not b:
         return 0
@@ -39,6 +41,8 @@ def _max_similarity_to_selected(item: dict, selected: list) -> float:
     return max(_pair_similarity(item, other) for other in selected)
 
 
+# Maximal Marginal Relevance, Carbonell and Goldstein (1998)
+# https://doi.org/10.1145/290941.291025
 def _mmr_score(item: dict, selected: list) -> float:
     max_sim = _max_similarity_to_selected(item, selected)
     final_score = get_field(item["c"], "final_score")

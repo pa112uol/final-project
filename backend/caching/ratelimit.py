@@ -11,6 +11,10 @@ MB_SLOT_KEY = f"{KEY_PREFIX}ratelimit:musicbrainz"
 
 SLOT_KEY_TTL_MS = 60_000
 
+# Next-slot reservation in the style of the GCRA / virtual-scheduling rate
+# limiters in the Redis rate-limiting patterns, using Redis TIME as the clock
+# so no worker depends on a synchronised local one
+# https://redis.io/docs/latest/develop/use-cases/patterns/
 _RESERVE_SLOT_SCRIPT = """
 local now = redis.call('TIME')
 local now_ms = now[1] * 1000 + math.floor(now[2] / 1000)

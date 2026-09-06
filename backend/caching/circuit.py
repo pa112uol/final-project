@@ -1,4 +1,6 @@
 # Circuit breaker shared by the sync and async cache implementations
+# Implements the Circuit Breaker pattern as described by Fowler
+# https://martinfowler.com/bliki/CircuitBreaker.html
 
 import logging
 import threading
