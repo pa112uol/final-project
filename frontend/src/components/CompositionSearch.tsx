@@ -5,6 +5,7 @@ import NoveltySlider, { noveltyPct } from "./NoveltySlider";
 import MoodPicker from "./MoodPicker";
 import Field from "./Field";
 import { FOCUS_RING, FOCUS_RING_INSET } from "../lib/styles";
+import { MAX_SEED_TRACKS } from "../lib/seedTracks";
 import type { Seed } from "../lib/types";
 
 interface SearchResult {
@@ -21,20 +22,6 @@ interface CompositionSearchProps {
   onDiscover: (seeds: Seed[], mood: string | null, novelty: number) => void;
   onRandom?: () => void;
 }
-
-const DEFAULT_MAX_SEED_TRACKS = 5;
-
-// Read the max seed tracks from the environment variable,
-// falling back to the default if not set or invalid
-function readMaxSeedTracks(): number {
-  const raw = import.meta.env.VITE_MAX_SEED_TRACKS;
-  const parsed = raw ? parseInt(raw, 10) : NaN;
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_MAX_SEED_TRACKS;
-}
-
-const MAX_SEED_TRACKS = readMaxSeedTracks();
 
 export default function CompositionSearch({
   onDiscover,

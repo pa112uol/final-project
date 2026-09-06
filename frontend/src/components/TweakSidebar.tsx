@@ -2,9 +2,12 @@ import { SlidersHorizontal } from "lucide-react";
 import Field from "./Field";
 import MoodPicker from "./MoodPicker";
 import NoveltySlider, { noveltyPct } from "./NoveltySlider";
+import SeedList from "./SeedList";
 import { SIDEBAR_FIXED } from "../lib/styles";
+import type { Seed } from "../lib/types";
 
 interface TweakSidebarProps {
+  seeds: Seed[];
   mood: string | null;
   onMoodChange: (mood: string | null) => void;
   novelty: number;
@@ -13,6 +16,7 @@ interface TweakSidebarProps {
 }
 
 export default function TweakSidebar({
+  seeds,
   mood,
   onMoodChange,
   novelty,
@@ -21,7 +25,7 @@ export default function TweakSidebar({
 }: TweakSidebarProps) {
   return (
     <aside
-      aria-label="Tweak recommendations"
+      aria-label="Recommendation controls"
       className={`bg-bg-base border-b border-border-subtle px-6 py-7 space-y-7 ${SIDEBAR_FIXED} lg:overflow-y-auto lg:border-b-0 lg:border-r`}
     >
       <h2 className="flex items-center gap-2.5 text-[17px] font-bold text-text-primary">
@@ -40,6 +44,8 @@ export default function TweakSidebar({
           onCommit={onNoveltyCommit}
         />
       </Field>
+
+      <SeedList seeds={seeds} />
     </aside>
   );
 }

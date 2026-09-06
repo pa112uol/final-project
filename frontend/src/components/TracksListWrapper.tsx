@@ -57,6 +57,7 @@ export default function TracksListWrapper() {
   return (
     <div className={SIDEBAR_PAD}>
       <TweakSidebar
+        seeds={seeds}
         mood={mood}
         onMoodChange={setMood}
         novelty={noveltyDisplay}
