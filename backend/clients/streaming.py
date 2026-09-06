@@ -97,9 +97,8 @@ async def _fetch_youtube_video_id(artist: str, title: str) -> tuple[str, bool]:
 
 
 async def get_streaming_links(artist: str, title: str):
-    from recommendations.types import StreamingLinks
+    from recommendations.types import StreamingLinks, spotify_search_url
 
-    query = urllib.parse.quote(f"{artist} {title}")
     (itunes, itunes_ok), (youtube_video_id, youtube_ok) = await asyncio.gather(
         _fetch_itunes_links(artist, title),
         _fetch_youtube_video_id(artist, title),
@@ -108,7 +107,7 @@ async def get_streaming_links(artist: str, title: str):
         apple_music=itunes["apple_music"],
         preview=itunes["preview"],
         youtube_video_id=youtube_video_id,
-        spotify=f"https://open.spotify.com/search/{query}",
+        spotify=spotify_search_url(artist, title),
         artwork=itunes.get("artwork"),
         lookup_failed=not (itunes_ok and youtube_ok),
     )

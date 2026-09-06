@@ -22,6 +22,10 @@ WARM_CONCURRENT_REQUESTS = 30
 WARM_CONCURRENCY = 5
 MUSICBRAINZ_DELAY_S = 1.2
 
+# The server under test must run with RECS_STREAMING_LINKS=0, so the timings
+# measure the recommendation pipeline rather than the per-track link fan-out
+STREAMING_LINKS_ENV = "RECS_STREAMING_LINKS"
+
 SEED_PAIRS = [
     [("Only Shallow", "My Bloody Valentine"), ("Vapour Trail", "Ride")],
     [("Space Song", "Beach House"), ("Heaven or Las Vegas", "Cocteau Twins")],
@@ -67,6 +71,22 @@ def cache_counters(conn: redis.Redis) -> tuple:
     return info["keyspace_hits"], info["keyspace_misses"]
 
 
+# A populated iTunes or YouTube field means the server ran the per-track link
+# lookups, which would put upstream link latency into the reported timings
+def assert_streaming_lookups_disabled(tracks: list) -> None:
+    looked_up = [
+        t
+        for t in tracks
+        if (t.get("streaming") or {}).get("appleMusic")
+        or (t.get("streaming") or {}).get("youtubeVideoId")
+    ]
+    if looked_up:
+        raise RuntimeError(
+            f"{len(looked_up)} tracks carry streaming links. "
+            f"Restart the server with {STREAMING_LINKS_ENV}=0 before timing."
+        )
+
+
 def summarise(summary) -> dict:
     return {
         "requests": summary.total_requests,
@@ -93,7 +113,9 @@ def main() -> None:
     with httpx.Client(timeout=60) as client:
         probe = client.get(urls[0])
         probe.raise_for_status()
-        track_count = len(probe.json()["tracks"])
+        tracks = probe.json()["tracks"]
+        track_count = len(tracks)
+    assert_streaming_lookups_disabled(tracks)
     conn.flushdb()
 
     hits_before, misses_before = cache_counters(conn)

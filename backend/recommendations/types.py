@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, runtime_checkable
+from urllib.parse import quote
 
 from .constants import SELECTION_TOP_MATCH
 
@@ -14,6 +15,22 @@ class StreamingLinks:
     artwork: Optional[dict] = None
     # Whether the MusicBrainz lookup for this track failed
     lookup_failed: bool = False
+
+
+def spotify_search_url(artist: str, title: str) -> str:
+    return f"https://open.spotify.com/search/{quote(f'{artist} {title}')}"
+
+
+# Streaming links without any upstream lookup
+def search_only_streaming_links(artist: str, title: str) -> StreamingLinks:
+    return StreamingLinks(
+        apple_music=None,
+        preview=None,
+        youtube_video_id=None,
+        spotify=spotify_search_url(artist, title),
+        artwork=None,
+        lookup_failed=False,
+    )
 
 
 @dataclass

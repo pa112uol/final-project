@@ -14,7 +14,12 @@ from recommendations.constants import (
     SELECTION_FOR_VARIETY,
     SELECTION_TOP_MATCH,
 )
-from recommendations.types import Seed, StreamingLinks, Candidate
+from recommendations.types import (
+    Seed,
+    StreamingLinks,
+    Candidate,
+    spotify_search_url,
+)
 
 
 def make_streaming():
@@ -696,3 +701,45 @@ class TestBuildTrackFromCandidate:
         candidate = self._candidate()
         await build_track_from_candidate(candidate, clients)
         assert calls == [(candidate.artist, candidate.title)]
+
+    async def test_streaming_lookup_is_skipped_when_the_flag_is_off(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECS_STREAMING_LINKS", "0")
+        calls = []
+
+        async def get_streaming_links(artist, title):
+            calls.append((artist, title))
+            return make_streaming()
+
+        clients = make_clients(get_streaming_links=get_streaming_links)
+        track = await build_track_from_candidate(self._candidate(), clients)
+        assert calls == []
+        assert track.streaming.apple_music is None
+        assert track.streaming.youtube_video_id is None
+
+    async def test_the_spotify_search_link_survives_a_skipped_lookup(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECS_STREAMING_LINKS", "0")
+        candidate = self._candidate()
+        track = await build_track_from_candidate(candidate, make_clients())
+        assert track.streaming.spotify == spotify_search_url(
+            candidate.artist, candidate.title
+        )
+        assert track.streaming.lookup_failed is False
+
+    @pytest.mark.parametrize("value", ["1", "true", "yes"])
+    async def test_truthy_flag_values_keep_the_lookup(
+        self, monkeypatch, value
+    ):
+        monkeypatch.setenv("RECS_STREAMING_LINKS", value)
+        calls = []
+
+        async def get_streaming_links(artist, title):
+            calls.append((artist, title))
+            return make_streaming()
+
+        clients = make_clients(get_streaming_links=get_streaming_links)
+        await build_track_from_candidate(self._candidate(), clients)
+        assert len(calls) == 1

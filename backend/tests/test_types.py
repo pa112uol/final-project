@@ -12,6 +12,8 @@ from recommendations.types import (
     Seed,
     releases_from_resolved,
     resolved_to_dict,
+    search_only_streaming_links,
+    spotify_search_url,
 )
 
 
@@ -255,3 +257,51 @@ class TestResolvedToDict:
         assert d["durationMs"] is None
         assert d["firstReleaseDate"] is None
         assert d["releases"] == []
+
+
+class TestSpotifySearchUrl:
+    def test_builds_a_search_url_from_artist_and_title(self):
+        assert (
+            spotify_search_url("Slowdive", "Alison")
+            == "https://open.spotify.com/search/Slowdive%20Alison"
+        )
+
+    @pytest.mark.parametrize(
+        "artist,title",
+        [
+            ("Sigur Rós", "Hoppípolla"),
+            ("AC/DC", "Back in Black"),
+            ("Godspeed You! Black Emperor", "Storm"),
+        ],
+    )
+    def test_escapes_characters_that_would_break_the_path(self, artist, title):
+        url = spotify_search_url(artist, title)
+        assert " " not in url
+        assert url.startswith("https://open.spotify.com/search/")
+
+    def test_handles_empty_fields(self):
+        expected = "https://open.spotify.com/search/%20"
+        assert spotify_search_url("", "") == expected
+
+
+class TestSearchOnlyStreamingLinks:
+    def test_leaves_every_looked_up_field_unset(self):
+        links = search_only_streaming_links("Slowdive", "Alison")
+        assert links.apple_music is None
+        assert links.preview is None
+        assert links.youtube_video_id is None
+        assert links.artwork is None
+
+    def test_still_carries_a_spotify_search_link(self):
+        links = search_only_streaming_links("Slowdive", "Alison")
+        assert links.spotify == spotify_search_url("Slowdive", "Alison")
+
+    # No lookup was attempted, so nothing failed
+    def test_does_not_report_a_failed_lookup(self):
+        assert search_only_streaming_links("A", "B").lookup_failed is False
+
+    def test_serialises_through_a_track_without_error(self):
+        track = make_track(streaming=search_only_streaming_links("A", "B"))
+        payload = track.to_dict()
+        assert payload["streaming"]["appleMusic"] is None
+        assert payload["streaming"]["spotify"].endswith("A%20B")

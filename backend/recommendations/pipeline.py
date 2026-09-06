@@ -2,7 +2,7 @@ import asyncio
 import logging
 import math
 import os
-from .types import Track
+from .types import Track, search_only_streaming_links
 from .candidates import build_candidates
 from .tags import (
     build_tag_weights,
@@ -459,7 +459,12 @@ async def build_track_from_candidate(candidate, clients):
     reason = get_field(candidate, "selection_reason", SELECTION_TOP_MATCH)
     tags = get_field(candidate, "tags", [])
 
-    streaming = await clients.get_streaming_links(artist, title)
+    # RECS_STREAMING_LINKS=0 drops the per-track iTunes and YouTube lookups,
+    # used by the load harness to time the pipeline rather than its link fan-out
+    if env_flag("RECS_STREAMING_LINKS", True):
+        streaming = await clients.get_streaming_links(artist, title)
+    else:
+        streaming = search_only_streaming_links(artist, title)
 
     return Track(
         mbid=mbid,
