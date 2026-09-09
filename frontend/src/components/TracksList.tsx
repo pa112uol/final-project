@@ -358,7 +358,7 @@ function TrackCard({
             <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-text-muted mt-[3px]">
               {album && <span>{album}</span>}
               {album && year && (
-                <span className="text-text-dim" aria-hidden="true">
+                <span className="text-text-muted" aria-hidden="true">
                   &middot;
                 </span>
               )}
@@ -424,7 +424,7 @@ function TrackCard({
               label="Novelty"
               pct={track.noveltyScore! * 100}
               weight={novelty}
-              barClassName="bg-text-dim"
+              barClassName="bg-text-muted"
             />
           </div>
         </div>

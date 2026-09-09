@@ -46,7 +46,7 @@ export default function NoveltySlider({
         className={`range-amber rounded ${FOCUS_RING}`}
       />
       <div
-        className="flex justify-between text-xs text-text-dim mt-2"
+        className="flex justify-between text-xs text-text-muted mt-2"
         aria-hidden="true"
       >
         <span>Popular</span>
