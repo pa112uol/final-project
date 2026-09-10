@@ -1,7 +1,10 @@
 import asyncio
 import pytest
 from unittest.mock import AsyncMock, patch
-from recommendations.candidates import build_candidates
+from recommendations.candidates import (
+    build_candidates,
+    score_artists_across_all_tag_pages,
+)
 from recommendations.constants import TOP_ARTISTS_COUNT
 
 RECORDING_A = {
@@ -119,6 +122,26 @@ class TestBuildCandidates:
         result = await build_candidates(TOP_TAGS, "key", 0.5, clients)
         # tag_weight_sum should be 100, not 200, even if novelty causes 2 pages
         assert result[0].tag_weight_sum == 100
+
+    async def test_duplicate_page_score_is_independent_of_completion_order(self):
+        async def score_with_delayed_page(delayed_page):
+            async def fetch_tag_artists(tag, page, limit, api_key):
+                if page == delayed_page:
+                    await asyncio.sleep(0.01)
+                return [{"name": "Slowdive", "mbid": "artist-mbid-1"}]
+
+            scores, _ = await score_artists_across_all_tag_pages(
+                TOP_TAGS,
+                pages_to_fetch=2,
+                api_key="key",
+                clients=make_clients(fetch_tag_artists=fetch_tag_artists),
+            )
+            return scores["slowdive"]["tag_weight_sum"]
+
+        page_one_late = await score_with_delayed_page(1)
+        page_two_late = await score_with_delayed_page(2)
+
+        assert page_one_late == page_two_late == 100
 
     async def test_calls_resolve_artist_mbid_for_artists_without_mbid(self):
         calls = []

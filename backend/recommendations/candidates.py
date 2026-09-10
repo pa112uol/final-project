@@ -18,21 +18,32 @@ def _rank_decay(rank: int) -> float:
     return 1 / math.log2(rank + 2)
 
 
-async def accumulate_artist_scores_from_tag_page(
+async def fetch_artist_scores_from_tag_page(
     tag: str,
     tag_weight: float,
     page_idx: int,
     api_key: str,
     clients,
-    artist_scores: dict,
-    artist_tags: dict,
-) -> None:
+) -> tuple[str, float, int, list]:
     try:
         artists = await clients.fetch_tag_artists(
             tag, page_idx + 1, ARTISTS_PER_TAG, api_key
         )
+        return tag, tag_weight, page_idx, artists
+    except Exception as exc:
+        logger.warning("[candidates] fetch_tag_artists failed: %s", exc)
+        return tag, tag_weight, page_idx, []
+
+
+def merge_artist_score_pages(pages: list) -> tuple[dict, dict]:
+    """Merge fetched pages in request order, independent of completion order."""
+    artist_scores = {}
+    artist_tags = {}
+    for tag, tag_weight, page_idx, artists in pages:
         for rank, artist in enumerate(artists):
             name = get_field(artist, "name")
+            if not name:
+                continue
             mbid = get_field(artist, "mbid")
             key = name.lower()
             if key not in artist_tags:
@@ -58,30 +69,28 @@ async def accumulate_artist_scores_from_tag_page(
                     "tag_weight_sum": tag_weight * rank_decay,
                     "mbid": mbid or "",
                 }
-    except Exception as exc:
-        logger.warning("[candidates] fetch_tag_artists failed: %s", exc)
+    return artist_scores, artist_tags
 
 
 async def score_artists_across_all_tag_pages(
     top_tags: list, pages_to_fetch: int, api_key: str, clients
 ) -> tuple:
-    artist_scores = {}
-    artist_tags = {}
     fetch_tasks = [
-        accumulate_artist_scores_from_tag_page(
+        fetch_artist_scores_from_tag_page(
             tag,
             tag_weight,
             page_idx,
             api_key,
             clients,
-            artist_scores,
-            artist_tags,
         )
         for tag, tag_weight in top_tags
         for page_idx in range(pages_to_fetch)
     ]
-    await asyncio.gather(*fetch_tasks)
-    return artist_scores, artist_tags
+    # gather preserves task-list order even when later pages complete first.
+    # Merging only after every fetch finishes ensures the best page rank claims
+    # the one allowed contribution for a duplicate (tag, artist) pair.
+    pages = await asyncio.gather(*fetch_tasks)
+    return merge_artist_score_pages(pages)
 
 
 # Resolve missing artist MBIDs via MusicBrainz (serialised by mb_fetch queue).
@@ -129,7 +138,7 @@ async def fetch_recordings_for_artist(
             recordings = []
 
     artist_key = artist["name"].lower()
-    matched_tags = list(artist_tags.get(artist_key, set()))
+    matched_tags = sorted(artist_tags.get(artist_key, set()))
     for recording in recordings:
         mbid = get_field(recording, "mbid")
         title = get_field(recording, "title")
