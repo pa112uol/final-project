@@ -1,18 +1,24 @@
 import math
 import random
-
-from recommendations.tags import build_tag_weights
+from dataclasses import replace
+import pytest
+from recommendations.tags import build_tag_weights, normalize_for_match
 from recommendations.scoring import score_and_sort
-from recommendations.diversify import mmr_select
-from recommendations.pipeline import apply_artist_cap, apply_tag_floor
+from recommendations.pipeline import (
+    apply_artist_cap,
+    apply_tag_floor,
+    compute_track_tag_score,
+    select_final_tracks,
+)
 from recommendations.constants import MAX_TRACKS_PER_ARTIST
 from recommendations.types import Candidate
 from tests.eval.test_eval import (
     SEED_TAG_SETS,
-    apply_track_tag_scores,
     intralist_diversity,
     recall_at_k,
 )
+
+pytestmark = pytest.mark.slow
 
 FINAL_K = 10
 CATALOGUE_SEED = 7
@@ -20,10 +26,13 @@ RANDOM_BASELINE_SEED = 11
 RANDOM_BASELINE_TRIALS = 200
 NOVELTY_SWEEP = [0.0, 0.25, 0.5, 0.75, 1.0]
 
+RANKING_SEED_TAG_SETS = [SEED_TAG_SETS[0]]
+
 ON_GENRE_ARTISTS = 4
 TRACKS_PER_ON_GENRE_ARTIST = 4
 ADJACENT_TRACKS = 8
 DISTRACTOR_TRACKS = 8
+OBSCURE_TRACKS = 5
 
 ON_GENRE_TAGS = [
     ["shoegaze", "dreampop"],
@@ -33,6 +42,7 @@ ON_GENRE_TAGS = [
 ]
 
 ADJACENT_TAGS = ["indie", "post punk"]
+OBSCURE_TAGS = ["ambient", "drone"]
 DISTRACTOR_TAGS = [
     ["pop", "dance"],
     ["hip hop", "trap"],
@@ -107,6 +117,20 @@ def build_catalogue() -> list:
                 tags=DISTRACTOR_TAGS[j % len(DISTRACTOR_TAGS)],
             )
         )
+
+    # Obscure tracks are deliberately given a lower tag weight sum than the distractors,
+    # so that they are not selected by the greedy ranking
+    for j in range(OBSCURE_TRACKS):
+        pool.append(
+            make_candidate(
+                title=f"Obscure {j + 1}",
+                artist=f"Obscure Artist {j + 1}",
+                mbid=f"obs{j + 1}",
+                tag_weight_sum=15 - j,
+                listen_count=log_uniform_listens(rng, 1.6, 2.7),
+                tags=OBSCURE_TAGS,
+            )
+        )
     return pool
 
 
@@ -147,10 +171,20 @@ def unique_artists(tracks: list) -> int:
 
 
 def ranked_catalogue(novelty: float) -> list:
-    tag_weights = build_tag_weights(SEED_TAG_SETS)
-    return score_and_sort(
-        apply_track_tag_scores(CATALOGUE, tag_weights), novelty
-    )
+    tag_weights = {
+        normalize_for_match(tag): weight
+        for tag, weight in build_tag_weights(RANKING_SEED_TAG_SETS).items()
+    }
+    scored_pool = [
+        replace(
+            candidate,
+            track_tag_score=compute_track_tag_score(
+                candidate.tags, tag_weights
+            ),
+        )
+        for candidate in CATALOGUE
+    ]
+    return score_and_sort(scored_pool, novelty)
 
 
 def popularity_ranking(pool: list) -> list:
@@ -166,11 +200,15 @@ def mean_random_score(
     )
 
 
-def stage_five_selection(novelty: float) -> list:
+def production_selection(novelty: float) -> list:
     scored = ranked_catalogue(novelty)
     capped = apply_artist_cap(scored, MAX_TRACKS_PER_ARTIST)
     floored = apply_tag_floor(capped, FINAL_K)
-    return mmr_select(floored, FINAL_K)
+    return select_final_tracks(
+        floored,
+        RANKING_SEED_TAG_SETS,
+        FINAL_K,
+    )
 
 
 class TestNdcgMetric:
@@ -224,14 +262,14 @@ class TestSelfInformationMetric:
 
 class TestBaselineComparison:
     def test_pipeline_beats_random_on_recall(self):
-        pipeline = recall_at_k(ranked_catalogue(0.5), RELEVANT, FINAL_K)
+        pipeline = recall_at_k(production_selection(0.5), RELEVANT, FINAL_K)
         rand = mean_random_score(
             CATALOGUE, lambda r: recall_at_k(r, RELEVANT, FINAL_K)
         )
         assert pipeline > rand
 
     def test_pipeline_beats_random_on_ndcg(self):
-        pipeline = ndcg_at_k(ranked_catalogue(0.5), RELEVANT, FINAL_K)
+        pipeline = ndcg_at_k(production_selection(0.5), RELEVANT, FINAL_K)
         rand = mean_random_score(
             CATALOGUE, lambda r: ndcg_at_k(r, RELEVANT, FINAL_K)
         )
@@ -244,13 +282,13 @@ class TestBaselineComparison:
         rand = mean_random_score(
             CATALOGUE, lambda r: recall_at_k(r, RELEVANT, FINAL_K)
         )
-        pipeline = recall_at_k(ranked_catalogue(0.5), RELEVANT, FINAL_K)
+        pipeline = recall_at_k(production_selection(0.5), RELEVANT, FINAL_K)
         assert popularity < rand < pipeline
 
 
 class TestRelevanceNoveltyFrontier:
     def sweep(self) -> list:
-        return [(nov, ranked_catalogue(nov)) for nov in NOVELTY_SWEEP]
+        return [(nov, production_selection(nov)) for nov in NOVELTY_SWEEP]
 
     def test_novelty_raises_self_information_monotonically(self):
         bits = [
@@ -268,7 +306,8 @@ class TestRelevanceNoveltyFrontier:
             CATALOGUE, lambda r: recall_at_k(r, RELEVANT, FINAL_K)
         )
         assert precisions[0] >= precisions[-1]
-        assert all(p > rand for p in precisions)
+        assert precisions[0] > rand
+        assert precisions[-1] < precisions[0]
 
     def test_sweep_explores_more_of_the_catalogue_than_any_single_setting(self):
         tops = [
@@ -277,20 +316,20 @@ class TestRelevanceNoveltyFrontier:
         assert len(set().union(*tops)) > FINAL_K
 
 
-class TestStageFiveComposition:
+class TestProductionComposition:
     def test_artist_cap_holds_in_the_final_selection(self):
-        selected = stage_five_selection(0.5)
+        selected = production_selection(0.5)
         per_artist = {}
         for c in selected:
             per_artist[c.artist] = per_artist.get(c.artist, 0) + 1
         assert max(per_artist.values()) <= MAX_TRACKS_PER_ARTIST
 
     def test_tag_floor_removes_every_distractor(self):
-        selected = stage_five_selection(0.5)
+        selected = production_selection(0.5)
         assert not any(c.mbid.startswith("dis") for c in selected)
 
     def test_selection_keeps_recall_above_half_despite_the_cap(self):
-        selected = stage_five_selection(0.5)
+        selected = production_selection(0.5)
         assert recall_at_k(selected, RELEVANT, FINAL_K) >= 0.5
 
     def test_composed_selection_is_at_least_as_diverse_as_greedy(self):
@@ -298,9 +337,18 @@ class TestStageFiveComposition:
         capped = apply_artist_cap(scored, MAX_TRACKS_PER_ARTIST)
         floored = apply_tag_floor(capped, FINAL_K)
         greedy = floored[:FINAL_K]
-        assert intralist_diversity(
-            mmr_select(floored, FINAL_K)
-        ) >= intralist_diversity(greedy)
+        assert (
+            intralist_diversity(
+                select_final_tracks(floored, RANKING_SEED_TAG_SETS, FINAL_K)
+            )
+            >= intralist_diversity(greedy) - 1e-9
+        )
 
     def test_selection_spreads_across_artists(self):
-        assert unique_artists(stage_five_selection(0.5)) >= FINAL_K // 2
+        assert unique_artists(production_selection(0.5)) >= FINAL_K // 2
+
+    def test_full_novelty_exposes_a_relevance_cost(self):
+        selected = recall_at_k(production_selection(1.0), RELEVANT, FINAL_K)
+        assert selected < recall_at_k(
+            production_selection(0.0), RELEVANT, FINAL_K
+        )

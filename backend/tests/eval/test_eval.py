@@ -2,9 +2,11 @@ import pytest
 from recommendations.tags import (
     build_tag_weights,
     normalize_tag,
+    normalize_for_match,
     distinctive_tags_per_seed,
     seeds_matched_by_track,
 )
+from recommendations.pipeline import compute_track_tag_score
 from recommendations.scoring import score_and_sort
 from recommendations.diversify import mmr_select, jaccard_sets, tokenize
 from recommendations.mood import apply_mood_scores, mood_match_score
@@ -91,10 +93,10 @@ def seed_balance(tracks: list, distinctive: list) -> float:
 
 
 def apply_track_tag_scores(candidates: list, tag_weights: dict) -> list:
-    nw = {normalize_tag(k.lower()): v for k, v in tag_weights.items()}
+    nw = {normalize_for_match(k): v for k, v in tag_weights.items()}
     result = []
     for c in candidates:
-        score = sum(nw.get(normalize_tag(t.lower()), 0) for t in c.tags)
+        score = compute_track_tag_score(c.tags, nw)
         result.append(
             Candidate(
                 title=c.title,

@@ -36,6 +36,14 @@ def get_client(name: str, **kwargs) -> httpx.AsyncClient:
 # lifespan on shutdown so connections are not left open past process exit
 async def close_clients() -> None:
     global _clients, _current_loop
+    running_loop = asyncio.get_running_loop()
+    # If the loop has changed since the clients were created,
+    # do not attempt to close them because they are already closed.
+    # Just discard them.
+    if _current_loop is not running_loop:
+        _clients = {}
+        _current_loop = None
+        return
     clients = list(_clients.values())
     _clients = {}
     _current_loop = None
