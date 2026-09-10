@@ -18,7 +18,8 @@ from recommendations.cached_clients import (
     NS_STREAMING,
     wrap_clients,
 )
-from recommendations.types import StreamingLinks
+from recommendations.pipeline import enrich_candidate_with_lf_tags
+from recommendations.types import Candidate, StreamingLinks
 
 API_KEY = "secret-lastfm-key"
 
@@ -478,9 +479,13 @@ UPSTREAM_ERROR_METHODS = [
     "fetch_top_recordings_for_artist",
 ]
 
+DEFAULTING_UPSTREAM_ERROR_METHODS = [
+    method for method in UPSTREAM_ERROR_METHODS if method != "fetch_track_tags_only"
+]
+
 
 class TestUpstreamFailureIsNotCached:
-    @pytest.mark.parametrize("method", UPSTREAM_ERROR_METHODS)
+    @pytest.mark.parametrize("method", DEFAULTING_UPSTREAM_ERROR_METHODS)
     async def test_transient_failure_returns_the_default_instead_of_raising(
         self, async_cache_enabled, method
     ):
@@ -490,6 +495,55 @@ class TestUpstreamFailureIsNotCached:
         )
         result = await getattr(wrap_clients(clients), method)(*args, **kwargs)
         assert result == []
+
+    async def test_track_tag_only_failure_remains_distinct_from_empty_result(
+        self, async_cache_enabled
+    ):
+        args, kwargs = CALLS["fetch_track_tags_only"]
+        clients = SimpleNamespace(
+            fetch_track_tags_only=AsyncMock(
+                side_effect=UpstreamError("HTTP 429")
+            )
+        )
+
+        with pytest.raises(UpstreamError):
+            await wrap_clients(clients).fetch_track_tags_only(*args, **kwargs)
+
+    async def test_pipeline_retries_wrapped_track_tag_failure(
+        self, async_cache_enabled
+    ):
+        clients = SimpleNamespace(
+            fetch_track_tags_only=AsyncMock(
+                side_effect=[
+                    UpstreamError("HTTP 429"),
+                    [{"name": "shoegaze", "count": 100}],
+                ]
+            )
+        )
+        candidate = Candidate(
+            title="Alison",
+            artist="Slowdive",
+            artist_mbid="a-1",
+            mbid="m-1",
+            duration_ms=None,
+            tag_weight_sum=100,
+            track_tag_score=0,
+            listen_count=1,
+            user_count=1,
+            artist_listen_count=0,
+            tags=[],
+        )
+        cached = wrap_clients(clients)
+
+        assert not await enrich_candidate_with_lf_tags(
+            candidate, cached, API_KEY, {"shoegaze": 100}
+        )
+        assert candidate.lf_enriched is False
+        assert await enrich_candidate_with_lf_tags(
+            candidate, cached, API_KEY, {"shoegaze": 100}
+        )
+        assert candidate.lf_enriched is True
+        assert candidate.tags == ["shoegaze"]
 
     @pytest.mark.parametrize("method", UPSTREAM_ERROR_METHODS)
     async def test_transient_failure_is_not_written_to_the_cache(
@@ -501,7 +555,11 @@ class TestUpstreamFailureIsNotCached:
         )
         cached = wrap_clients(clients)
 
-        await getattr(cached, method)(*args, **kwargs)
+        if method == "fetch_track_tags_only":
+            with pytest.raises(UpstreamError):
+                await getattr(cached, method)(*args, **kwargs)
+        else:
+            await getattr(cached, method)(*args, **kwargs)
         getattr(clients, method).side_effect = None
         getattr(clients, method).return_value = [{"name": "recovered"}]
         result = await getattr(cached, method)(*args, **kwargs)

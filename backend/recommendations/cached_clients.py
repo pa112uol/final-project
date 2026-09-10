@@ -53,9 +53,16 @@ def _unwrap(entry: object) -> object:
 
 
 # Runs the read-through: cached value if present, otherwise the real client.
-# A transient UpstreamError is served as `default` but never cached
+# A transient UpstreamError is never cached. Callers may receive the default
+# or request the original signal when the pipeline has its own retry policy.
 async def _read_through(
-    namespace: str, key_parts: list, ttl: int, fetch, is_positive=bool, default=None
+    namespace: str,
+    key_parts: list,
+    ttl: int,
+    fetch,
+    is_positive=bool,
+    default=None,
+    reraise_upstream: bool = False,
 ):
     cache = get_async_cache()
     key = build_key(namespace, *key_parts)
@@ -66,6 +73,8 @@ async def _read_through(
         value = await fetch()
     except UpstreamError as exc:
         logger.warning("[cache] upstream fetch failed for %s: %s", key, exc)
+        if reraise_upstream:
+            raise
         return default
     stored_ttl = ttl if is_positive(value) else NEGATIVE_TTL_S
     await cache.set_json(key, _wrap(value), stored_ttl)
@@ -106,6 +115,11 @@ def _cached_fetch_track_tags_only(inner):
             TTL_TRACK_TAGS,
             lambda: inner(title, artist, api_key, mbid),
             default=[],
+            # The pipeline catches this signal and leaves the candidate
+            # eligible for its post-selection retry. Returning [] here would
+            # make a transient failure indistinguishable from a healthy empty
+            # response and incorrectly mark the candidate as enriched.
+            reraise_upstream=True,
         )
 
     return fetch_track_tags_only
@@ -118,6 +132,7 @@ def _cached_fetch_recording_tags(inner):
             [mbid],
             TTL_RECORDING_TAGS,
             lambda: inner(mbid),
+            default=[],
         )
 
     return fetch_recording_tags
