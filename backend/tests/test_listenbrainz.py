@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+from clients.http import UpstreamError
 from clients.listenbrainz import (
     fetch_recording_tags,
     fetch_artist_top_recordings,
@@ -25,10 +26,11 @@ class TestFetchRecordingTags:
     async def test_returns_empty_for_empty_mbid(self):
         assert await fetch_recording_tags("") == []
 
-    async def test_returns_empty_on_http_failure(self):
+    async def test_raises_upstream_error_on_http_failure(self):
         client, _ = make_client(success=False, status_code=404)
         with patch("clients.listenbrainz.get_client", return_value=client):
-            assert await fetch_recording_tags("abc-mbid") == []
+            with pytest.raises(UpstreamError):
+                await fetch_recording_tags("abc-mbid")
 
     async def test_merges_tags_from_all_three_sources_weighted_by_scope(self):
         data = {
@@ -109,12 +111,12 @@ class TestFetchRecordingTags:
             result = await fetch_recording_tags("abc-mbid")
         assert result[0]["name"] == "rock"
 
-    async def test_returns_empty_on_exception(self):
+    async def test_raises_upstream_error_on_exception(self):
         client = MagicMock()
         client.get = AsyncMock(side_effect=Exception("timeout"))
         with patch("clients.listenbrainz.get_client", return_value=client):
-            result = await fetch_recording_tags("abc-mbid")
-        assert result == []
+            with pytest.raises(UpstreamError):
+                await fetch_recording_tags("abc-mbid")
 
 
 class TestFetchArtistTopRecordings:
@@ -271,8 +273,8 @@ class TestFetchArtistPopularity:
         assert "art1" not in result
         assert result["art2"] == 500
 
-    async def test_returns_empty_on_http_failure(self):
+    async def test_raises_upstream_error_on_http_failure(self):
         client, _ = make_client(success=False)
         with patch("clients.listenbrainz.get_client", return_value=client):
-            result = await fetch_artist_popularity(["art1"])
-        assert result == {}
+            with pytest.raises(UpstreamError):
+                await fetch_artist_popularity(["art1"])

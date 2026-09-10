@@ -79,6 +79,12 @@ class TestLfFetch:
             with pytest.raises(UpstreamError):
                 await _lf_fetch({"method": "track.getTopTags"}, "key")
 
+    async def test_raises_upstream_error_for_error_in_successful_json(self):
+        client = make_client({"error": 29, "message": "Rate limit exceeded"})
+        with patch("clients.lastfm.get_client", return_value=client):
+            with pytest.raises(UpstreamError):
+                await _lf_fetch({"method": "track.getTopTags"}, "key")
+
     async def test_raises_upstream_error_on_network_failure(self):
         client = MagicMock()
         client.get = AsyncMock(side_effect=httpx.ConnectTimeout("timed out"))

@@ -28,9 +28,14 @@ async def _lf_fetch(params: dict, api_key: str) -> dict:
     if not res.is_success:
         raise UpstreamError(f"Last.fm returned HTTP {res.status_code}")
     try:
-        return res.json()
+        data = res.json()
     except ValueError as exc:
         raise UpstreamError(f"Last.fm returned invalid JSON: {exc}") from exc
+    if isinstance(data, dict) and data.get("error") is not None:
+        raise UpstreamError(
+            f"Last.fm API error {data.get('error')}: {data.get('message', '')}"
+        )
+    return data
 
 
 def _parse_tags(raw) -> list:

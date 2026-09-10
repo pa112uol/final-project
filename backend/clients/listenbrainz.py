@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import httpx
-from .http import get_client
+from .http import UpstreamError, get_client
 
 LB_BASE = "https://api.listenbrainz.org/1"
 
@@ -49,12 +49,9 @@ async def fetch_recording_tags(mbid: str) -> list:
         # two-source profile, the second is real data. Log which one happened
         # so a run's tag profile can be interpreted after the fact.
         if not res.is_success:
-            logger.warning(
-                "[listenbrainz] recording tags unavailable for %s: HTTP %s",
-                mbid,
-                res.status_code,
+            raise UpstreamError(
+                f"ListenBrainz recording tags returned HTTP {res.status_code}"
             )
-            return []
         data = res.json()
         tag_block = data.get(mbid, {}).get("tag")
         if not tag_block:
@@ -71,14 +68,12 @@ async def fetch_recording_tags(mbid: str) -> list:
                 if name:
                     merged[name] = merged.get(name, 0) + count * weight
         return [{"name": k, "count": v} for k, v in merged.items()]
+    except UpstreamError:
+        raise
     except Exception as exc:
-        logger.warning(
-            "[listenbrainz] recording tags failed for %s: %s: %s",
-            mbid,
-            type(exc).__name__,
-            exc,
-        )
-        return []
+        raise UpstreamError(
+            f"ListenBrainz recording tags failed for {mbid}: {exc}"
+        ) from exc
 
 
 async def fetch_artist_top_recordings(artist_mbid: str, limit: int) -> list:
@@ -174,12 +169,9 @@ async def fetch_artist_popularity(artist_mbids: list) -> dict:
             headers={"Content-Type": "application/json"},
         )
         if not res.is_success:
-            logger.warning(
-                "[lb] fetch_artist_popularity HTTP %d: %s",
-                res.status_code,
-                res.text[:200],
+            raise UpstreamError(
+                f"ListenBrainz artist popularity returned HTTP {res.status_code}"
             )
-            return {}
         data = res.json()
         result = {}
         for r in data:
@@ -191,6 +183,9 @@ async def fetch_artist_popularity(artist_mbids: list) -> dict:
             len(valid_mbids),
         )
         return result
-    except Exception as e:
-        logger.error("[lb] fetch_artist_popularity failed: %s", e)
-        return {}
+    except UpstreamError:
+        raise
+    except Exception as exc:
+        raise UpstreamError(
+            f"ListenBrainz artist popularity failed: {exc}"
+        ) from exc
