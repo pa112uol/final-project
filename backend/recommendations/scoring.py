@@ -167,6 +167,7 @@ def _as_scored_candidate(
         user_count=get_field(c, "user_count"),
         artist_listen_count=get_field(c, "artist_listen_count"),
         tags=get_field(c, "tags"),
+        ranking_tags=get_field(c, "ranking_tags", None),
         mood_score=get_field(c, "mood_score", 0.0) or 0.0,
         lf_enriched=get_field(c, "lf_enriched", False),
         final_score=final_score,

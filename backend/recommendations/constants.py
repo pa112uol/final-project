@@ -39,6 +39,7 @@ MAX_TRACKS_PER_ARTIST = 2
 # diversity term lifted it past higher scoring but more redundant ones.
 SELECTION_TOP_MATCH = "top_match"
 SELECTION_FOR_VARIETY = "for_variety"
+SELECTION_FOR_SEED_COVERAGE = "for_seed_coverage"
 
 # Within recording-level obscurity: listen count (scale) vs user count (breadth)
 LISTEN_VS_USER_BLEND = 0.6

@@ -741,6 +741,17 @@ class TestBuildTrackFromCandidate:
         )
         assert track.streaming.lookup_failed is False
 
+    async def test_preserves_tags_used_for_ranking_after_later_enrichment(self):
+        candidate = self._candidate(
+            tags=["shoegaze", "mellow"],
+            ranking_tags=["shoegaze"],
+        )
+        track = await build_track_from_candidate(candidate, make_clients())
+
+        assert track.tags == ["shoegaze", "mellow"]
+        assert track.ranking_tags == ["shoegaze"]
+        assert track.to_dict()["rankingTags"] == ["shoegaze"]
+
     @pytest.mark.parametrize("value", ["1", "true", "yes"])
     async def test_truthy_flag_values_keep_the_lookup(
         self, monkeypatch, value

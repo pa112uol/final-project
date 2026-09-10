@@ -73,6 +73,7 @@ class TestTrackToDict:
             "relevanceScore",
             "noveltyScore",
             "tags",
+            "rankingTags",
             "selectionReason",
         ):
             assert key in d, f"missing key: {key}"

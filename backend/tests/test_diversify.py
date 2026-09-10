@@ -6,6 +6,7 @@ from recommendations.diversify import (
     mmr_select_balanced,
 )
 from recommendations.constants import (
+    SELECTION_FOR_SEED_COVERAGE,
     SELECTION_FOR_VARIETY,
     SELECTION_TOP_MATCH,
 )
@@ -260,14 +261,18 @@ class TestSelectionReason:
             cands, 4, lambda c: mapping.get(c.mbid, set()), seed_count=2
         )
         assert all(
-            c.selection_reason in (SELECTION_TOP_MATCH, SELECTION_FOR_VARIETY)
+            c.selection_reason
+            in (
+                SELECTION_TOP_MATCH,
+                SELECTION_FOR_VARIETY,
+                SELECTION_FOR_SEED_COVERAGE,
+            )
             for c in result
         )
 
-    def test_balanced_quota_pick_is_not_mislabeled_as_variety(self):
-        # "b0" is seated by its seed quota, not by the diversity term. It is
-        # the only candidate in its pool, so nothing outscored it there and it
-        # must read as a top match rather than claiming a variety boost
+    def test_balanced_quota_pick_is_labeled_as_seed_coverage(self):
+        # "b0" is seated by its seed quota despite scoring below the global
+        # best candidate, so the response must disclose the coverage rule.
         cands = [
             make_scored_candidate(
                 mbid=f"a{i}",
@@ -286,7 +291,7 @@ class TestSelectionReason:
             cands, 2, lambda c: mapping.get(c.mbid, set()), seed_count=2
         )
         seated = next(c for c in result if c.mbid == "b0")
-        assert seated.selection_reason == SELECTION_TOP_MATCH
+        assert seated.selection_reason == SELECTION_FOR_SEED_COVERAGE
 
 
 class TestMmrSelectBalanced:

@@ -93,6 +93,9 @@ class Track:
     relevance_score: float
     novelty_score: float
     tags: list = field(default_factory=list)
+    # Tags present when scoring and selection ran. Later enrichment can add
+    # metadata tags, so this preserves the evidence used for the decision.
+    ranking_tags: list = field(default_factory=list)
     selection_reason: str = SELECTION_TOP_MATCH
 
     def to_dict(self):
@@ -114,6 +117,7 @@ class Track:
             "relevanceScore": self.relevance_score,
             "noveltyScore": self.novelty_score,
             "tags": self.tags,
+            "rankingTags": self.ranking_tags,
             "selectionReason": self.selection_reason,
         }
 
@@ -154,6 +158,8 @@ class Candidate:
     user_count: int
     artist_listen_count: int
     tags: list
+    # Snapshot immediately before scoring. None means scoring has not run yet.
+    ranking_tags: Optional[list] = None
     # How strongly the track expresses the requested mood, in [-1, 1]. Stays
     # 0.0 when no mood was requested, which zeroes the mood term in scoring
     mood_score: float = 0.0

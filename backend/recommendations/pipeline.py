@@ -467,6 +467,7 @@ async def build_track_from_candidate(candidate, clients):
     nov_score = get_field(candidate, "novelty_score")
     reason = get_field(candidate, "selection_reason", SELECTION_TOP_MATCH)
     tags = get_field(candidate, "tags", [])
+    ranking_tags = get_field(candidate, "ranking_tags", None)
 
     # RECS_STREAMING_LINKS=0 drops the per-track iTunes and YouTube lookups,
     # used by the load harness to time the pipeline rather than its link fan-out
@@ -487,6 +488,7 @@ async def build_track_from_candidate(candidate, clients):
         relevance_score=rel_score,
         novelty_score=nov_score,
         tags=tags,
+        ranking_tags=ranking_tags if ranking_tags is not None else tags,
         selection_reason=reason,
     )
 
@@ -561,6 +563,16 @@ async def run_pipeline(
     # Mood is scored after enrichment, since mood tags usually arrive with
     # the Last.fm track tags rather than the ListenBrainz ones
     apply_mood_scores(candidates, mood)
+
+    # Preserve the exact tag evidence used by scoring, mood and MMR. The
+    # post-selection enrichment pass may add metadata tags, but it must not
+    # rewrite the explanation of a decision that has already been made.
+    for candidate in candidates:
+        set_field(
+            candidate,
+            "ranking_tags",
+            list(get_field(candidate, "tags", [])),
+        )
 
     # Stage 4: Score by relevance/novelty, then cap per-artist
     with_mbid = [c for c in candidates if get_field(c, "mbid")]

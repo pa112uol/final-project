@@ -25,12 +25,12 @@ interface Track {
   noveltyScore?: number;
   selectionReason?: SelectionReason;
   tags?: string[];
+  rankingTags?: string[];
 }
 
-// Why the track won its slot. "top_match" means it simply had the best score
-// among the candidates, "for_variety" means the diversity re-ranker
-// lifted it past higher scoring but more similar tracks
-type SelectionReason = "top_match" | "for_variety";
+// Why the track won its slot. Coverage and diversity choices are disclosed
+// separately because either rule can lift a lower-scoring candidate.
+type SelectionReason = "top_match" | "for_variety" | "for_seed_coverage";
 
 // Shape of a GET /api/recording/ response, used to patch a track once its
 // canonical recording has resolved
@@ -139,17 +139,23 @@ function LinkChip({ href, children }: { href: string; children: ReactNode }) {
 // bury the two that genuinely need it: the ones ranked above a card with
 // visibly better bars, which otherwise read as a sorting bug
 function SelectionBadge({ reason }: { reason?: SelectionReason }) {
-  if (reason !== "for_variety") return null;
+  if (reason !== "for_variety" && reason !== "for_seed_coverage") return null;
+  const forCoverage = reason === "for_seed_coverage";
   return (
     <div className="mb-3">
       <span
         className={`${CHIP_SHAPE} inline-block text-[11px] uppercase tracking-[0.06em] text-text-muted bg-fill border border-border-subtle`}
-        title="Ranked above higher-scoring tracks because it adds something the picks above it don't"
+        title={
+          forCoverage
+            ? "Selected to represent a seed track that had fewer results"
+            : "Ranked above higher-scoring tracks because it adds something the picks above it doesn't"
+        }
       >
-        Added for variety
+        {forCoverage ? "Added for seed coverage" : "Added for variety"}
         <span className="sr-only">
-          : ranked above higher-scoring tracks because it adds something the
-          picks above it don&rsquo;t
+          {forCoverage
+            ? ": selected to represent a seed track that had fewer results"
+            : ": ranked above higher-scoring tracks because it adds something the picks above it doesn't"}
         </span>
       </span>
     </div>
@@ -322,7 +328,7 @@ function TrackCard({
   const duration = fmtDuration(track.durationMs);
   const album = albumName(track);
   const links = outboundLinks(track, pending);
-  const tags = (track.tags ?? []).slice(0, MAX_TAGS);
+  const tags = (track.rankingTags ?? track.tags ?? []).slice(0, MAX_TAGS);
   // Unranked tracks have nothing to say on either axis, so the whole footer
   // goes rather than rendering empty bars
   const scored =
@@ -594,4 +600,3 @@ export default function TracksList({
     </div>
   );
 }
-
