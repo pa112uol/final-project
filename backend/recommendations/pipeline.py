@@ -242,16 +242,20 @@ def filter_and_deduplicate_candidates(
 
 
 # Picks the enrichment mode for a request. RECS_ENRICH_MODE always wins so a
-# run can be pinned for testing, otherwise auto reads novelty, and an unknown
-# novelty (None) falls back to the richer mode
-def enrich_mode(novelty: float | None = None) -> str:
+# run can be pinned for testing. Otherwise auto reads novelty and mood. High
+# novelty can defer tags only when no mood needs their evidence before ranking.
+def enrich_mode(novelty: float | None = None, mood: str | None = None) -> str:
     configured = os.environ.get("RECS_ENRICH_MODE", DEFAULT_ENRICH_MODE)
     mode = configured.strip().lower()
     if mode not in ENRICH_MODES:
         mode = DEFAULT_ENRICH_MODE
     if mode != ENRICH_MODE_AUTO:
         return mode
-    if novelty is not None and novelty >= HIGH_NOVELTY_ENRICH_THRESHOLD:
+    if (
+        novelty is not None
+        and novelty >= HIGH_NOVELTY_ENRICH_THRESHOLD
+        and not mood
+    ):
         return ENRICH_MODE_FINAL
     return ENRICH_MODE_HYBRID
 
@@ -260,9 +264,11 @@ def enrich_mode(novelty: float | None = None) -> str:
 # mode, none in "final" mode, and for the capped modes the most listened tracks
 # of the highest scoring artists
 def select_enrichment_targets(
-    candidates: list, novelty: float | None = None
+    candidates: list,
+    novelty: float | None = None,
+    mood: str | None = None,
 ) -> list:
-    mode = enrich_mode(novelty)
+    mode = enrich_mode(novelty, mood)
     if mode == ENRICH_MODE_ALL:
         return list(candidates)
     if mode == ENRICH_MODE_FINAL:
@@ -340,8 +346,9 @@ async def enrich_candidates_with_lf_tags(
     api_key: str,
     normalized_tag_weights: dict,
     novelty: float | None = None,
+    mood: str | None = None,
 ) -> None:
-    targets = select_enrichment_targets(candidates, novelty)
+    targets = select_enrichment_targets(candidates, novelty, mood)
     results = await asyncio.gather(
         *[
             enrich_candidate_with_lf_tags(
@@ -370,8 +377,9 @@ async def enrich_selected_tracks(
     api_key: str,
     normalized_tag_weights: dict,
     novelty: float | None = None,
+    mood: str | None = None,
 ) -> None:
-    mode = enrich_mode(novelty)
+    mode = enrich_mode(novelty, mood)
     if mode not in POST_SELECTION_ENRICH_MODES:
         return
     pending = [c for c in selected if not get_field(c, "lf_enriched", False)]
@@ -557,7 +565,12 @@ async def run_pipeline(
 
     # Stage 3: Enrich with track-level tags, then artist-level popularity
     await enrich_candidates_with_lf_tags(
-        candidates, clients, api_key, normalized_tag_weights, novelty
+        candidates,
+        clients,
+        api_key,
+        normalized_tag_weights,
+        novelty,
+        mood,
     )
     await apply_artist_popularity_fallback(candidates, clients)
     # Mood is scored after enrichment, since mood tags usually arrive with
@@ -599,7 +612,12 @@ async def run_pipeline(
     # tracks with only the sparse tags the source supplied, so top up the
     # winners before returning
     await enrich_selected_tracks(
-        top, clients, api_key, normalized_tag_weights, novelty
+        top,
+        clients,
+        api_key,
+        normalized_tag_weights,
+        novelty,
+        mood,
     )
     _log_final_candidates(top)
 

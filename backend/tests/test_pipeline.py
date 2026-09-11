@@ -583,6 +583,13 @@ class TestSelectEnrichmentTargets:
         candidates = [make_candidate("A", f"t{i}") for i in range(20)]
         assert select_enrichment_targets(candidates) == []
 
+    def test_explicit_final_mode_still_wins_when_mood_is_present(
+        self, monkeypatch
+    ):
+        monkeypatch.setenv("RECS_ENRICH_MODE", "final")
+        candidates = [make_candidate("A", f"t{i}") for i in range(20)]
+        assert select_enrichment_targets(candidates, 1.0, "chill") == []
+
     def test_hybrid_mode_still_enriches_a_capped_subset(self, monkeypatch):
         monkeypatch.setenv("RECS_ENRICH_MODE", "hybrid")
         candidates = [
@@ -658,6 +665,9 @@ class TestAutoEnrichMode:
 
     def test_high_novelty_switches_to_final(self):
         assert enrich_mode(1.0) == "final"
+
+    def test_mood_keeps_preselection_enrichment_at_high_novelty(self):
+        assert enrich_mode(1.0, "chill") == "hybrid"
 
     def test_switches_exactly_at_the_threshold(self):
         assert enrich_mode(HIGH_NOVELTY_ENRICH_THRESHOLD) == "final"
