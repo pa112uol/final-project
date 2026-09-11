@@ -9,6 +9,7 @@ from clients.musicbrainz import (
     _build_field_query,
     mb_fetch,
     MB_MAX_ATTEMPTS,
+    SEARCH_RESULTS_LIMIT,
     search_tracks,
     resolve_canonical_mbid,
     resolve_canonical_recording,
@@ -191,6 +192,12 @@ class TestParseArtistTrack:
 
 
 class TestBuildFieldQuery:
+    @pytest.mark.parametrize("artist", ["Queen", None])
+    def test_canonical_branch_accepts_each_supported_primary_type(self, artist):
+        q = _build_field_query(artist, "Bohemian Rhapsody")
+        assert "primarytype:album OR primarytype:single OR primarytype:ep" in q
+        assert "primarytype:album AND primarytype:single" not in q
+
     def test_with_artist_uses_artistname_field(self):
         q = _build_field_query("Queen", "Bohemian Rhapsody")
         assert "artistname:" in q
@@ -445,16 +452,74 @@ class TestSearchTracks:
         assert len(results) == 1
         assert results[0]["mbid"] == "id1"
 
-    async def test_limits_to_10_results(self):
+    async def test_deduplicates_close_lengths_despite_missing_length_data(self):
+        recs = [
+            _make_recording(
+                mbid="id1", title="Song", artist="Artist", score=90
+            ),
+            _make_recording(
+                mbid="id2", title="Song", artist="Artist", score=85
+            ),
+        ]
+        with _patch_client(_make_response(recs)):
+            results = await search_tracks("Artist - Song")
+        assert len(results) == 1
+
+    async def test_keeps_same_title_artist_when_lengths_differ_substantially(
+        self,
+    ):
+        recs = [
+            _make_recording(
+                mbid="single-edit",
+                title="Chasing Cars",
+                artist="Snow Patrol",
+                score=100,
+                length=247106,
+            ),
+            _make_recording(
+                mbid="album-cut",
+                title="Chasing Cars",
+                artist="Snow Patrol",
+                score=98,
+                length=267891,
+            ),
+        ]
+        with _patch_client(_make_response(recs)):
+            results = await search_tracks("Snow Patrol - Chasing Cars")
+        assert {r["mbid"] for r in results} == {"single-edit", "album-cut"}
+
+    async def test_deduplicates_same_title_artist_when_lengths_are_close(self):
+        recs = [
+            _make_recording(
+                mbid="canonical",
+                title="Chasing Cars",
+                artist="Snow Patrol",
+                score=98,
+                length=267891,
+            ),
+            _make_recording(
+                mbid="reissue-retag",
+                title="Chasing Cars",
+                artist="Snow Patrol",
+                score=96,
+                length=266053,
+            ),
+        ]
+        with _patch_client(_make_response(recs)):
+            results = await search_tracks("Snow Patrol - Chasing Cars")
+        assert len(results) == 1
+        assert results[0]["mbid"] == "canonical"
+
+    async def test_limits_to_search_results_limit(self):
         recs = [
             _make_recording(
                 mbid=str(i), title=f"Song {i}", artist=f"Artist {i}", score=100
             )
-            for i in range(20)
+            for i in range(SEARCH_RESULTS_LIMIT + 10)
         ]
         with _patch_client(_make_response(recs)):
             results = await search_tracks("Song")
-        assert len(results) == 10
+        assert len(results) == SEARCH_RESULTS_LIMIT
 
     async def test_results_sorted_by_score_descending(self):
         recs = [

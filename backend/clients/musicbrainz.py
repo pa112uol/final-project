@@ -24,6 +24,14 @@ MB_RETRY_BACKOFF_S = 0.5
 MB_MAX_ATTEMPTS = 2
 MB_TIMEOUT_S = 10
 
+# The MusicBrainz search API returns a maximum of 100 results
+# Limit that number to 25
+SEARCH_RESULTS_LIMIT = 25
+
+# How close two same-title/same-artist recordings' lengths must be (in ms)
+# to count as the same duplicated master rather than a distinct edit
+_DUP_DURATION_TOLERANCE_MS = 5000
+
 logger = logging.getLogger(__name__)
 
 # Reserves the next slot in Redis so spacing holds across
@@ -217,7 +225,7 @@ def _build_field_query(artist: str | None, title: str) -> str:
         )
         canonical = (
             f"((({forward}) OR ({reversed_}))"
-            f" AND primarytype:album AND primarytype:single"
+            f" AND (primarytype:album OR primarytype:single OR primarytype:ep)"
             f" AND {_CANON_EXCLUDE})^4"
         )
         core = (
@@ -231,7 +239,7 @@ def _build_field_query(artist: str | None, title: str) -> str:
         phrase = f'recording:("{esc_title}")'
         fuzzy = " AND ".join(f"recording:{_escape_mb(w)}~" for w in words if w)
         canonical = (
-            f"(({phrase}) AND primarytype:album AND primarytype:single"
+            f"(({phrase}) AND (primarytype:album OR primarytype:single OR primarytype:ep)"
             f" AND {_CANON_EXCLUDE})^4"
         )
         if len(words) == 1:
@@ -303,7 +311,12 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
         return []
 
     seen_mbids: set[str] = set()
-    seen_pairs: set[tuple[str, str]] = set()
+    # Track title/artist pairs already returned, with the durations of the
+    # recordings kept for each pair.  If a new recording has the same title and
+    # artist as a previously kept one, and its duration is within the tolerance,
+    # keep the first one and discard the new one.
+    # This avoids returning multiple versions of the same recording
+    seen_pairs: dict[tuple[str, str], list[int | None]] = {}
     results = []
 
     for r in recordings:
@@ -314,12 +327,25 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
         credits = r.get("artist-credit") or []
         artist_name = credits[0].get("name", "") if credits else ""
         title = r.get("title", "")
+        duration_ms = r.get("length")
 
         pair = (title.lower(), artist_name.lower())
-        if mbid in seen_mbids or pair in seen_pairs:
+        kept_durations = seen_pairs.get(pair)
+        is_duplicate = mbid in seen_mbids or (
+            kept_durations is not None
+            and any(
+                (
+                    d == duration_ms
+                    if d is None or duration_ms is None
+                    else abs(d - duration_ms) <= _DUP_DURATION_TOLERANCE_MS
+                )
+                for d in kept_durations
+            )
+        )
+        if is_duplicate:
             continue
         seen_mbids.add(mbid)
-        seen_pairs.add(pair)
+        seen_pairs.setdefault(pair, []).append(duration_ms)
 
         # MB returns a recording's releases in arbitrary order, so take the
         # original album: earliest release whose release group carries no
@@ -370,7 +396,7 @@ async def search_tracks_fields(title: str, artist: str | None = None) -> list:
         )
 
     results.sort(key=lambda x: x["score"], reverse=True)
-    return results[:10]
+    return results[:SEARCH_RESULTS_LIMIT]
 
 
 # Recording-detail fields shared by every code path that resolves nothing
