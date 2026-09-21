@@ -147,14 +147,14 @@ function SelectionBadge({ reason }: { reason?: SelectionReason }) {
         className={`${CHIP_SHAPE} inline-block text-[11px] uppercase tracking-[0.06em] text-text-muted bg-fill border border-border-subtle`}
         title={
           forCoverage
-            ? "Selected to represent a seed track that had fewer results"
+            ? "Included so a seed track with fewer results is still represented here"
             : "Ranked above higher-scoring tracks because it adds something the picks above it doesn't"
         }
       >
-        {forCoverage ? "Added for seed coverage" : "Added for variety"}
+        {forCoverage ? "Added for balance" : "Added for variety"}
         <span className="sr-only">
           {forCoverage
-            ? ": selected to represent a seed track that had fewer results"
+            ? ": included so a seed track with fewer results is still represented here"
             : ": ranked above higher-scoring tracks because it adds something the picks above it doesn't"}
         </span>
       </span>
@@ -162,16 +162,18 @@ function SelectionBadge({ reason }: { reason?: SelectionReason }) {
   );
 }
 
-// The two things about this list that the cards cannot explain on their own,
-// stated once at the top rather than repeated per card: both are properties of
+// The things about this list that the cards cannot explain on their own,
+// stated once at the top rather than repeated per card: all are properties of
 // the whole ordering, not of any one track. Each clause appears only when it
 // has something to explain, so the note is silent on an unremarkable list.
 function OrderingNote({
   novelty,
   hasVarietyPicks,
+  hasCoveragePicks,
 }: {
   novelty: number;
   hasVarietyPicks: boolean;
+  hasCoveragePicks: boolean;
 }) {
   const relevanceInert = 1 - novelty < UNWEIGHTED_THRESHOLD;
   const noveltyInert = novelty < UNWEIGHTED_THRESHOLD;
@@ -179,7 +181,17 @@ function OrderingNote({
     ? ["relevance", "Novelty"]
     : ["novelty", "Relevance"];
   const showWeighting = relevanceInert || noveltyInert;
-  if (!showWeighting && !hasVarietyPicks) return null;
+  const badges = [
+    hasVarietyPicks && {
+      label: "Added for Variety",
+      reason: "adding something new",
+    },
+    hasCoveragePicks && {
+      label: "Added for Balance",
+      reason: "representing a seed with fewer results",
+    },
+  ].filter((b): b is { label: string; reason: string } => Boolean(b));
+  if (!showWeighting && badges.length === 0) return null;
 
   return (
     <p className="text-[13px] text-text-muted mb-5 leading-relaxed">
@@ -192,14 +204,17 @@ function OrderingNote({
           ordering.{" "}
         </>
       )}
-      {hasVarietyPicks && (
+      {badges.length > 0 && (
         <>
           Tracks marked{" "}
-          <span className="text-text-primary font-semibold">
-            Added for Variety
-          </span>{" "}
-          ranked above higher-scoring ones because they bring something the
-          picks above them don&rsquo;t.
+          {badges.map((b, i) => (
+            <span key={b.label}>
+              {i > 0 && " or "}
+              <span className="text-text-primary font-semibold">{b.label}</span>
+            </span>
+          ))}{" "}
+          ranked above higher-scoring ones by{" "}
+          {badges.map((b) => b.reason).join(" or ")}.
         </>
       )}
     </p>
@@ -580,11 +595,18 @@ export default function TracksList({
   const hasVarietyPicks = tracks.some(
     (t) => t.selectionReason === "for_variety",
   );
+  const hasCoveragePicks = tracks.some(
+    (t) => t.selectionReason === "for_seed_coverage",
+  );
 
   return (
     <div>
       {ranked && (
-        <OrderingNote novelty={novelty} hasVarietyPicks={hasVarietyPicks} />
+        <OrderingNote
+          novelty={novelty}
+          hasVarietyPicks={hasVarietyPicks}
+          hasCoveragePicks={hasCoveragePicks}
+        />
       )}
       <div className="space-y-5">
         {tracks.map((t, i) => (
@@ -600,3 +622,4 @@ export default function TracksList({
     </div>
   );
 }
+
