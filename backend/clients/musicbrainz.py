@@ -4,7 +4,7 @@ import logging
 import time
 import httpx
 from caching.ratelimit import MB_SLOT_KEY, RedisRateLimiter
-from .http import get_client
+from .http import UpstreamError, get_client
 
 # MusicBrainz requires a meaningful User-Agent: App/Version (contact)
 # https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting
@@ -123,6 +123,8 @@ async def mb_fetch(url: str, params: dict | None = None) -> httpx.Response:
         return res
 
 
+# Returns "" when MusicBrainz has no confident match. A failed request raises
+# UpstreamError instead, so the cache never stores an outage as "no such artist"
 async def resolve_artist_mbid(name: str) -> str:
     clean_name = name.replace('"', "")
     query = f'artist:"{clean_name}"'
@@ -131,8 +133,13 @@ async def resolve_artist_mbid(name: str) -> str:
             f"{MB_BASE}/artist",
             params={"query": query, "limit": 1, "fmt": "json"},
         )
-        if not res.is_success:
-            return ""
+    except Exception as exc:
+        raise UpstreamError(f"MusicBrainz artist lookup failed: {exc}") from exc
+    if not res.is_success:
+        raise UpstreamError(
+            f"MusicBrainz artist lookup returned HTTP {res.status_code}"
+        )
+    try:
         data = res.json()
         artists = data.get("artists") or []
         if not artists:
@@ -141,8 +148,8 @@ async def resolve_artist_mbid(name: str) -> str:
         if top.get("score", 0) < 85:
             return ""
         return top.get("id", "")
-    except Exception:
-        return ""
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise UpstreamError(f"MusicBrainz returned a malformed body: {exc}") from exc
 
 
 _NOISE_RE = re.compile(

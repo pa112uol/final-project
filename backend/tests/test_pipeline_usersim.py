@@ -1,15 +1,3 @@
-"""
-User-simulation quality tests for the recommendation pipeline.
-
-Each scenario mirrors a realistic user search: mainstream pop, hip-hop,
-classic rock, ultra-niche, multi-seed crossover, and intermediate novelty.
-Quality metrics are printed and asserted per scenario.
-
-Run with: pytest tests/test_pipeline_usersim.py -s -v
-
-Mirrors the assertions defined in pipeline.usersim.test.ts.
-"""
-
 import time
 import asyncio
 import pytest

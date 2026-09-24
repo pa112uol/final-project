@@ -1,5 +1,3 @@
-"""Tests for the /api/recommendations/ and /api/search/ endpoints."""
-
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 

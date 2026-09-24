@@ -2,6 +2,7 @@ import pytest
 import httpx
 from unittest.mock import AsyncMock, MagicMock, patch
 from clients import musicbrainz
+from clients.http import UpstreamError
 from clients.musicbrainz import (
     _clean,
     _escape_mb,
@@ -861,22 +862,23 @@ class TestResolveArtistMbid:
             result = await resolve_artist_mbid("Nonexistent")
         assert result == ""
 
-    async def test_returns_empty_on_http_failure(self):
+    async def test_raises_upstream_error_on_http_failure(self):
         resp = MagicMock()
         resp.is_success = False
+        resp.status_code = 503
         with patch(
             "clients.musicbrainz.mb_fetch", new=AsyncMock(return_value=resp)
         ):
-            result = await resolve_artist_mbid("Artist")
-        assert result == ""
+            with pytest.raises(UpstreamError, match="503"):
+                await resolve_artist_mbid("Artist")
 
-    async def test_returns_empty_on_exception(self):
+    async def test_raises_upstream_error_on_exception(self):
         with patch(
             "clients.musicbrainz.mb_fetch",
             new=AsyncMock(side_effect=Exception("timeout")),
         ):
-            result = await resolve_artist_mbid("Artist")
-        assert result == ""
+            with pytest.raises(UpstreamError, match="timeout"):
+                await resolve_artist_mbid("Artist")
 
     async def test_strips_double_quotes_from_name_before_querying(self):
         mock_fetch = make_mb_resp([{"id": "abc-123", "score": 90}])

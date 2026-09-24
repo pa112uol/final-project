@@ -179,6 +179,16 @@ class ScoredCandidate(Candidate):
     selection_reason: str = SELECTION_TOP_MATCH
 
 
+# The pipeline's state at the retrieval to ranking boundary. Retrieved holds
+# every cleaned, enriched candidate and scored the rankable ones in score order
+@dataclass
+class ScoredPool:
+    seed_tag_sets: list
+    normalized_tag_weights: dict
+    retrieved: list
+    scored: list
+
+
 @runtime_checkable
 class PipelineClients(Protocol):
     async def fetch_tag_artists(

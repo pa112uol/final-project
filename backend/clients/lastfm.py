@@ -1,10 +1,17 @@
 import logging
+import re
 import httpx
 from .http import UpstreamError, get_client
 
 LASTFM_BASE = "https://ws.audioscrobbler.com/2.0"
 
 logger = logging.getLogger(__name__)
+
+# Last.fm reports an unknown track or artist as error 6 with a "not found"
+# message. That is an answer, not an outage, so it reads as an empty result
+LASTFM_INVALID_PARAMETERS_ERROR = 6
+# Covers both "Track not found" and "The artist you supplied could not be found"
+_NOT_FOUND_PATTERN = re.compile(r"\bnot (be )?found\b", re.IGNORECASE)
 
 # A single recommendations request fans out dozens of Last.fm calls; under
 # FastAPI's real request concurrency the old max_connections=20 became the
@@ -15,8 +22,16 @@ _CLIENT = dict(
 )
 
 
+def _is_not_found(data: dict) -> bool:
+    message = str(data.get("message", ""))
+    return data.get("error") == LASTFM_INVALID_PARAMETERS_ERROR and bool(
+        _NOT_FOUND_PATTERN.search(message)
+    )
+
+
 # Raises UpstreamError on failure rather than returning None, so a transient
-# outage is never mistaken for a genuine empty result by the read-through cache
+# outage is never mistaken for a genuine empty result by the read-through cache.
+# A "not found" answer returns an empty dict, which callers read as no data
 async def _lf_fetch(params: dict, api_key: str) -> dict:
     all_params = dict(params)
     all_params["api_key"] = api_key
@@ -31,6 +46,8 @@ async def _lf_fetch(params: dict, api_key: str) -> dict:
         data = res.json()
     except ValueError as exc:
         raise UpstreamError(f"Last.fm returned invalid JSON: {exc}") from exc
+    if isinstance(data, dict) and _is_not_found(data):
+        return {}
     if isinstance(data, dict) and data.get("error") is not None:
         raise UpstreamError(
             f"Last.fm API error {data.get('error')}: {data.get('message', '')}"

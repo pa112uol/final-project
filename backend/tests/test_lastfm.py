@@ -85,6 +85,22 @@ class TestLfFetch:
             with pytest.raises(UpstreamError):
                 await _lf_fetch({"method": "track.getTopTags"}, "key")
 
+    @pytest.mark.parametrize(
+        "message", ["Track not found", "The artist you supplied could not be found"]
+    )
+    async def test_not_found_is_an_empty_answer_not_a_failure(self, message):
+        body = {"error": 6, "message": message}
+        client = make_client(body)
+        with patch("clients.lastfm.get_client", return_value=client):
+            result = await _lf_fetch({"method": "track.getTopTags"}, "key")
+        assert result == {}
+
+    async def test_other_invalid_parameter_errors_still_raise(self):
+        client = make_client({"error": 6, "message": "Invalid parameters"})
+        with patch("clients.lastfm.get_client", return_value=client):
+            with pytest.raises(UpstreamError):
+                await _lf_fetch({"method": "track.getTopTags"}, "key")
+
     async def test_raises_upstream_error_on_network_failure(self):
         client = MagicMock()
         client.get = AsyncMock(side_effect=httpx.ConnectTimeout("timed out"))

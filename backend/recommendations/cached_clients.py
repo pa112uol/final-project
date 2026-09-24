@@ -160,6 +160,7 @@ def _cached_resolve_artist_mbid(inner):
             [name],
             TTL_ARTIST_MBID,
             lambda: inner(name),
+            default="",
         )
 
     return resolve_artist_mbid

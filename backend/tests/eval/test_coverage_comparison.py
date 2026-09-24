@@ -1,6 +1,6 @@
 import pytest
 
-from tests.eval.coverage_benchmark import (
+from evaluation.coverage_benchmark import (
     FINAL_K,
     aggregate_metrics,
     build_scenarios,

@@ -36,6 +36,8 @@ references
 backend/demo
 backend/bench
 report
+script
+video
 
 # debug
 npm-debug.log*
@@ -69,3 +71,7 @@ dist/
 .mypy_cache/
 .ruff_cache/
 *.sqlite3
+
+# Evaluation evidence
+backend/evaluation/evidence/listenbrainz-responses.json
+backend/evaluation/evidence/mpd/

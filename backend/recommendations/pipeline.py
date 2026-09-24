@@ -2,7 +2,7 @@ import asyncio
 import logging
 import math
 import os
-from .types import Track, search_only_streaming_links
+from .types import ScoredPool, Track, search_only_streaming_links
 from .candidates import build_candidates
 from .tags import (
     build_tag_weights,
@@ -33,6 +33,7 @@ from .constants import (
     POST_SELECTION_ENRICH_MODES,
     HIGH_NOVELTY_ENRICH_THRESHOLD,
     SELECTION_TOP_MATCH,
+    MMR_LAMBDA,
 )
 from .utils import get_field, set_field, env_flag
 
@@ -42,7 +43,12 @@ logger = logging.getLogger(__name__)
 # Select the final RECOMMENDATION_LIMIT tracks, optionally guaranteeing each
 # seed a share of the slots when the feature is enabled and there is more than
 # one seed
-def select_final_tracks(pre_mmr: list, seed_tag_sets: list, limit: int) -> list:
+def select_final_tracks(
+    pre_mmr: list,
+    seed_tag_sets: list,
+    limit: int,
+    mmr_lambda: float = MMR_LAMBDA,
+) -> list:
     if env_flag("RECS_SEED_BALANCED", True) and len(seed_tag_sets) > 1:
         distinctive = distinctive_tags_per_seed(seed_tag_sets)
 
@@ -56,9 +62,9 @@ def select_final_tracks(pre_mmr: list, seed_tag_sets: list, limit: int) -> list:
             [len(d) for d in distinctive],
         )
         return mmr_select_balanced(
-            pre_mmr, limit, seed_ids_of, len(seed_tag_sets)
+            pre_mmr, limit, seed_ids_of, len(seed_tag_sets), mmr_lambda
         )
-    return mmr_select(pre_mmr, limit)
+    return mmr_select(pre_mmr, limit, mmr_lambda)
 
 
 # Log the tags associated with a seed
@@ -450,11 +456,19 @@ def apply_artist_cap(scored: list, max_per_artist: int) -> list:
     return kept
 
 
+def _with_tag_match(candidates: list) -> list:
+    return [c for c in candidates if get_field(c, "track_tag_score") > 0]
+
+
+# The floor only filters when enough tag-matched tracks remain to fill the list,
+# otherwise it falls back to keeping unmatched tracks
+def tag_floor_applies(candidates: list, limit: int) -> bool:
+    return len(_with_tag_match(candidates)) >= limit
+
+
 def apply_tag_floor(candidates: list, limit: int) -> list:
-    with_tag_match = [
-        c for c in candidates if get_field(c, "track_tag_score") > 0
-    ]
-    excluded = len(with_tag_match) >= limit
+    with_tag_match = _with_tag_match(candidates)
+    excluded = tag_floor_applies(candidates, limit)
     logger.info(
         "[pipeline:tagfloor] %d tracks with no seed tag match -- %s",
         len(candidates) - len(with_tag_match),
@@ -501,14 +515,16 @@ async def build_track_from_candidate(candidate, clients):
     )
 
 
-async def run_pipeline(
+# Stages 1 to 4 of the pipeline: profile the seeds, retrieve and clean
+# candidates, enrich them, then score. Returns None when the seeds have no tags
+async def build_scored_pool(
     seeds: list,
     api_key: str,
     mood,
     novelty: float,
     clients,
     exclude_seed_artists: bool = True,
-) -> list:
+) -> ScoredPool | None:
     logger.info(
         "[pipeline:entry] seeds:%d mood:%s novelty:%s  %s",
         len(seeds),
@@ -529,7 +545,7 @@ async def run_pipeline(
     sorted_tags = sorted(tag_weights.items(), key=lambda x: (-x[1], x[0]))
 
     if not sorted_tags:
-        return []
+        return None
 
     # Exclude tags that match a seed artist name, e.g. "queen" for a Queen seed
     # would make fetch_tag_artists return mostly Queen members and collaborators
@@ -587,7 +603,7 @@ async def run_pipeline(
             list(get_field(candidate, "tags", [])),
         )
 
-    # Stage 4: Score by relevance/novelty, then cap per-artist
+    # Stage 4: Score by relevance/novelty
     with_mbid = [c for c in candidates if get_field(c, "mbid")]
     logger.info(
         "[pipeline:score] scoring %d candidates with mbid (dropped %d without mbid)",
@@ -595,19 +611,48 @@ async def run_pipeline(
         len(candidates) - len(with_mbid),
     )
 
-    scored = score_and_sort(with_mbid, novelty)
-    after_artist_cap = apply_artist_cap(scored, MAX_TRACKS_PER_ARTIST)
+    return ScoredPool(
+        seed_tag_sets=seed_tag_sets,
+        normalized_tag_weights=normalized_tag_weights,
+        retrieved=candidates,
+        scored=score_and_sort(with_mbid, novelty),
+    )
 
-    # Stage 5: Floor by tag match against the seed profile
-    pre_mmr = apply_tag_floor(after_artist_cap, RECOMMENDATION_LIMIT)
 
-    # Stage 6: Diversify the final selection via MMR
+# Stages 5 and 6: cap per artist, floor by tag match, then diversify via MMR.
+# artist_cap None disables the cap and mmr_lambda 1.0 disables the diversity term
+def select_from_pool(
+    scored: list,
+    seed_tag_sets: list,
+    limit: int = RECOMMENDATION_LIMIT,
+    artist_cap: int | None = MAX_TRACKS_PER_ARTIST,
+    mmr_lambda: float = MMR_LAMBDA,
+) -> list:
+    capped = scored if artist_cap is None else apply_artist_cap(scored, artist_cap)
+    pre_mmr = apply_tag_floor(capped, limit)
     logger.info(
         "[pipeline:mmr] selecting %d from %d scored candidates",
-        RECOMMENDATION_LIMIT,
+        limit,
         len(pre_mmr),
     )
-    top = select_final_tracks(pre_mmr, seed_tag_sets, RECOMMENDATION_LIMIT)
+    return select_final_tracks(pre_mmr, seed_tag_sets, limit, mmr_lambda)
+
+
+async def run_pipeline(
+    seeds: list,
+    api_key: str,
+    mood,
+    novelty: float,
+    clients,
+    exclude_seed_artists: bool = True,
+) -> list:
+    pool = await build_scored_pool(
+        seeds, api_key, mood, novelty, clients, exclude_seed_artists
+    )
+    if pool is None:
+        return []
+
+    top = select_from_pool(pool.scored, pool.seed_tag_sets)
     # Modes that skip or cap the pre-selection pass would otherwise return
     # tracks with only the sparse tags the source supplied, so top up the
     # winners before returning
@@ -615,7 +660,7 @@ async def run_pipeline(
         top,
         clients,
         api_key,
-        normalized_tag_weights,
+        pool.normalized_tag_weights,
         novelty,
         mood,
     )

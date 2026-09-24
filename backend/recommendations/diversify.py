@@ -44,10 +44,11 @@ def _max_similarity_to_selected(item: dict, selected: list) -> float:
 
 # Maximal Marginal Relevance, Carbonell and Goldstein (1998)
 # https://doi.org/10.1145/290941.291025
-def _mmr_score(item: dict, selected: list) -> float:
+# At mmr_lambda 1.0 the diversity term vanishes and selection is pure score order
+def _mmr_score(item: dict, selected: list, mmr_lambda: float) -> float:
     max_sim = _max_similarity_to_selected(item, selected)
     final_score = get_field(item["c"], "final_score")
-    return MMR_LAMBDA * final_score - (1 - MMR_LAMBDA) * max_sim
+    return mmr_lambda * final_score - (1 - mmr_lambda) * max_sim
 
 
 # A pick is "for variety" exactly when something in the pool it beat had a
@@ -68,11 +69,11 @@ def _mark_selected(best: dict, pool: list) -> None:
     set_field(best["c"], "selection_reason", _selection_reason(best, pool))
 
 
-def _pick_best(remaining: list, selected: list) -> int:
+def _pick_best(remaining: list, selected: list, mmr_lambda: float) -> int:
     best_idx = 0
     best_score = float("-inf")
     for i, item in enumerate(remaining):
-        score = _mmr_score(item, selected)
+        score = _mmr_score(item, selected, mmr_lambda)
         if score > best_score:
             best_score = score
             best_idx = i
@@ -94,12 +95,12 @@ def _prepare_items(ranked: list, seed_ids_of=None) -> list:
 # Pick the candidate with the best MMR score, then repeat until k are selected.
 # MMR balances relevance or final_score against diversity or max similarity
 # to already-selected candidates
-def mmr_select(ranked: list, k: int) -> list:
+def mmr_select(ranked: list, k: int, mmr_lambda: float = MMR_LAMBDA) -> list:
     remaining = _prepare_items(ranked)
     selected = []
 
     while len(selected) < k and remaining:
-        best_idx = _pick_best(remaining, selected)
+        best_idx = _pick_best(remaining, selected, mmr_lambda)
         best = remaining.pop(best_idx)
         _mark_selected(best, remaining)
         selected.append(best)
@@ -128,10 +129,14 @@ def _needy_seed(remaining: list, counts: list, target: int) -> int | None:
 # from its own candidates, still by MMR score so relevance and diversity decide
 # within a seed, then falls back to global MMR once quotas are met
 def mmr_select_balanced(
-    ranked: list, k: int, seed_ids_of, seed_count: int
+    ranked: list,
+    k: int,
+    seed_ids_of,
+    seed_count: int,
+    mmr_lambda: float = MMR_LAMBDA,
 ) -> list:
     if seed_count <= 1:
-        return mmr_select(ranked, k)
+        return mmr_select(ranked, k, mmr_lambda)
 
     remaining = _prepare_items(ranked, seed_ids_of)
     selected = []
@@ -144,8 +149,8 @@ def mmr_select_balanced(
             pool = remaining
         else:
             pool = [item for item in remaining if seed in item["seeds"]]
-        best = pool[_pick_best(pool, selected)]
-        global_best = remaining[_pick_best(remaining, selected)]
+        best = pool[_pick_best(pool, selected, mmr_lambda)]
+        global_best = remaining[_pick_best(remaining, selected, mmr_lambda)]
         if seed is not None and best is not global_best:
             set_field(
                 best["c"],

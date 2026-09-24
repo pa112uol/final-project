@@ -496,6 +496,18 @@ class TestUpstreamFailureIsNotCached:
         result = await getattr(wrap_clients(clients), method)(*args, **kwargs)
         assert result == []
 
+    async def test_artist_lookup_failure_returns_empty_and_is_retried(
+        self, async_cache_enabled
+    ):
+        clients = SimpleNamespace(
+            resolve_artist_mbid=AsyncMock(
+                side_effect=[UpstreamError("HTTP 503"), "artist-mbid-1"]
+            )
+        )
+        cached = wrap_clients(clients)
+        assert await cached.resolve_artist_mbid("Radiohead") == ""
+        assert await cached.resolve_artist_mbid("Radiohead") == "artist-mbid-1"
+
     async def test_track_tag_only_failure_remains_distinct_from_empty_result(
         self, async_cache_enabled
     ):

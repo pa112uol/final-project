@@ -436,3 +436,37 @@ class TestSelectFinalTracksDispatch:
         pool = self._skewed_pool()
         result = select_final_tracks(pool, [[LFTag(name="funk", count=100)]], 2)
         assert result == mmr_select(pool, 2)
+
+
+class TestMmrLambda:
+    def _redundant_pool(self):
+        return [
+            make_scored_candidate(
+                mbid="a1", artist="A", final_score=0.9, tags=["shoegaze"]
+            ),
+            make_scored_candidate(
+                mbid="a2", artist="A", final_score=0.8, tags=["shoegaze"]
+            ),
+            make_scored_candidate(
+                mbid="b1", artist="B", final_score=0.7, tags=["jazz"]
+            ),
+        ]
+
+    def test_lambda_one_selects_in_pure_score_order(self):
+        result = mmr_select(self._redundant_pool(), 3, mmr_lambda=1.0)
+        assert [c.mbid for c in result] == ["a1", "a2", "b1"]
+
+    def test_lambda_one_marks_every_pick_as_a_top_match(self):
+        result = mmr_select(self._redundant_pool(), 3, mmr_lambda=1.0)
+        assert {c.selection_reason for c in result} == {SELECTION_TOP_MATCH}
+
+    def test_default_lambda_still_promotes_the_diverse_candidate(self):
+        result = mmr_select(self._redundant_pool(), 2)
+        assert [c.mbid for c in result] == ["a1", "b1"]
+
+    def test_balanced_selection_honours_lambda(self):
+        pool = self._redundant_pool()
+        result = mmr_select_balanced(
+            pool, 2, lambda c: {0}, seed_count=2, mmr_lambda=1.0
+        )
+        assert [c.mbid for c in result] == ["a1", "a2"]

@@ -1,5 +1,8 @@
 import pytest
 from recommendations.pipeline import (
+    build_scored_pool,
+    select_from_pool,
+    tag_floor_applies,
     run_pipeline,
     select_enrichment_targets,
     enrich_selected_tracks,
@@ -15,6 +18,7 @@ from recommendations.constants import (
     SELECTION_TOP_MATCH,
 )
 from recommendations.types import (
+    ScoredCandidate,
     Seed,
     StreamingLinks,
     Candidate,
@@ -776,3 +780,95 @@ class TestBuildTrackFromCandidate:
         clients = make_clients(get_streaming_links=get_streaming_links)
         await build_track_from_candidate(self._candidate(), clients)
         assert len(calls) == 1
+
+
+def make_scored(mbid, artist, final_score, track_tag_score=1.0):
+    return ScoredCandidate(
+        title=f"Track {mbid}",
+        artist=artist,
+        artist_mbid=f"artist-{artist}",
+        mbid=mbid,
+        duration_ms=None,
+        tag_weight_sum=100,
+        track_tag_score=track_tag_score,
+        listen_count=0,
+        user_count=0,
+        artist_listen_count=0,
+        tags=["shoegaze"],
+        final_score=final_score,
+    )
+
+
+class TestBuildScoredPool:
+    async def test_returns_retrieved_and_scored_candidates(self):
+        pool = await build_scored_pool(
+            [TEST_SEED], "fake-api-key", None, 0, make_clients()
+        )
+        assert pool.retrieved
+        assert pool.scored
+        assert len(pool.seed_tag_sets) == 1
+
+    async def test_scored_pool_is_in_descending_score_order(self):
+        pool = await build_scored_pool(
+            [TEST_SEED], "fake-api-key", None, 0, make_clients()
+        )
+        scores = [c.final_score for c in pool.scored]
+        assert scores == sorted(scores, reverse=True)
+
+    async def test_returns_none_when_seeds_have_no_tags(self):
+        async def no_tags(title, artist, api_key, mbid=None):
+            return []
+
+        pool = await build_scored_pool(
+            [TEST_SEED],
+            "fake-api-key",
+            None,
+            0,
+            make_clients(fetch_track_tags=no_tags),
+        )
+        assert pool is None
+
+    async def test_run_pipeline_returns_the_pool_selection(self):
+        clients = make_clients()
+        pool = await build_scored_pool(
+            [TEST_SEED], "fake-api-key", None, 0, clients
+        )
+        expected = select_from_pool(pool.scored, pool.seed_tag_sets)
+        tracks = await run_pipeline(
+            [TEST_SEED], "fake-api-key", None, 0, clients
+        )
+        assert [t.mbid for t in tracks] == [c.mbid for c in expected]
+
+
+class TestSelectFromPool:
+    def _pool(self):
+        return [
+            make_scored("a1", "A", 0.9),
+            make_scored("a2", "A", 0.8),
+            make_scored("a3", "A", 0.7),
+            make_scored("b1", "B", 0.6),
+        ]
+
+    def test_default_cap_limits_tracks_per_artist(self):
+        selected = select_from_pool(self._pool(), [[]], limit=4)
+        assert sum(c.artist == "A" for c in selected) == MAX_TRACKS_PER_ARTIST
+
+    def test_no_cap_and_lambda_one_is_plain_score_order(self):
+        selected = select_from_pool(
+            self._pool(), [[]], limit=4, artist_cap=None, mmr_lambda=1.0
+        )
+        assert [c.mbid for c in selected] == ["a1", "a2", "a3", "b1"]
+
+    def test_empty_pool_selects_nothing(self):
+        assert select_from_pool([], [[]]) == []
+
+
+class TestTagFloorApplies:
+    @pytest.mark.parametrize(
+        "matched, limit, expected",
+        [(3, 3, True), (2, 3, False), (0, 1, False), (5, 0, True)],
+    )
+    def test_compares_tag_matched_count_with_limit(self, matched, limit, expected):
+        pool = [make_scored(f"m{i}", "A", 0.5) for i in range(matched)]
+        pool.append(make_scored("unmatched", "B", 0.5, track_tag_score=0))
+        assert tag_floor_applies(pool, limit) is expected
