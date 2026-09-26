@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { ArrowUpRight } from "lucide-react";
 import CoverArt from "./CoverArt";
@@ -141,21 +141,24 @@ function LinkChip({ href, children }: { href: string; children: ReactNode }) {
 function SelectionBadge({ reason }: { reason?: SelectionReason }) {
   if (reason !== "for_variety" && reason !== "for_seed_coverage") return null;
   const forCoverage = reason === "for_seed_coverage";
+  const tooltipId = useId();
+  const explanation = forCoverage
+    ? "Included so a seed track with fewer results is still represented here"
+    : "Ranked above higher-scoring tracks because it adds something the picks above it doesn't";
   return (
     <div className="mb-3">
       <span
-        className={`${CHIP_SHAPE} inline-block text-[11px] uppercase tracking-[0.06em] text-text-muted bg-fill border border-border-subtle`}
-        title={
-          forCoverage
-            ? "Included so a seed track with fewer results is still represented here"
-            : "Ranked above higher-scoring tracks because it adds something the picks above it doesn't"
-        }
+        tabIndex={0}
+        aria-describedby={tooltipId}
+        className={`group relative ${CHIP_SHAPE} inline-block text-[11px] uppercase tracking-[0.06em] text-text-muted bg-fill border border-border-subtle cursor-help ${FOCUS_RING}`}
       >
         {forCoverage ? "Added for balance" : "Added for variety"}
-        <span className="sr-only">
-          {forCoverage
-            ? ": included so a seed track with fewer results is still represented here"
-            : ": ranked above higher-scoring tracks because it adds something the picks above it doesn't"}
+        <span
+          id={tooltipId}
+          role="tooltip"
+          className="pointer-events-none absolute left-0 top-full z-20 mt-2 w-72 rounded-chip border border-border-default bg-bg-raised px-3 py-2 text-[13px] font-normal normal-case tracking-normal leading-snug text-text-secondary shadow-lg shadow-black/40 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+        >
+          {explanation}
         </span>
       </span>
     </div>
